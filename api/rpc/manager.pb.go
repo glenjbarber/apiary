@@ -19160,15 +19160,26 @@ func (x *ReissueJoinSecondPinResponse) GetReissuesRemaining() uint32 {
 // credential: nothing authenticates a caller by presenting one, and
 // no caller may refuse, route or authenticate on comb_name.
 type TrustedPeer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	CombName      string                 `protobuf:"bytes,2,opt,name=comb_name,json=combName,proto3" json:"comb_name,omitempty"`
-	Fingerprint   string                 `protobuf:"bytes,3,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
-	CertPem       string                 `protobuf:"bytes,4,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
-	NotAfterUnix  int64                  `protobuf:"varint,5,opt,name=not_after_unix,json=notAfterUnix,proto3" json:"not_after_unix,omitempty"`
-	PinnedAtUnix  int64                  `protobuf:"varint,6,opt,name=pinned_at_unix,json=pinnedAtUnix,proto3" json:"pinned_at_unix,omitempty"`
-	PinnedBy      string                 `protobuf:"bytes,7,opt,name=pinned_by,json=pinnedBy,proto3" json:"pinned_by,omitempty"`
-	IsVoter       bool                   `protobuf:"varint,8,opt,name=is_voter,json=isVoter,proto3" json:"is_voter,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	NodeId       string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	CombName     string                 `protobuf:"bytes,2,opt,name=comb_name,json=combName,proto3" json:"comb_name,omitempty"`
+	Fingerprint  string                 `protobuf:"bytes,3,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	CertPem      string                 `protobuf:"bytes,4,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	NotAfterUnix int64                  `protobuf:"varint,5,opt,name=not_after_unix,json=notAfterUnix,proto3" json:"not_after_unix,omitempty"`
+	PinnedAtUnix int64                  `protobuf:"varint,6,opt,name=pinned_at_unix,json=pinnedAtUnix,proto3" json:"pinned_at_unix,omitempty"`
+	PinnedBy     string                 `protobuf:"bytes,7,opt,name=pinned_by,json=pinnedBy,proto3" json:"pinned_by,omitempty"`
+	IsVoter      bool                   `protobuf:"varint,8,opt,name=is_voter,json=isVoter,proto3" json:"is_voter,omitempty"`
+	// next is the STAGED certificate during an ADR-0170 trust
+	// transition: the one that is about to replace this one.
+	//
+	// While it is set, BOTH certificates are trusted - the current one
+	// and the staged one - so the Comb can already serve the incoming
+	// certificate while its peers can already verify it. It is dropped
+	// when the transition is activated or abandoned.
+	//
+	// Empty means nothing is staged, which is the shape every entry
+	// before ADR-0170 has.
+	Next          *TrustedPeer `protobuf:"bytes,9,opt,name=next,proto3" json:"next,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -19257,6 +19268,13 @@ func (x *TrustedPeer) GetIsVoter() bool {
 		return x.IsVoter
 	}
 	return false
+}
+
+func (x *TrustedPeer) GetNext() *TrustedPeer {
+	if x != nil {
+		return x.Next
+	}
+	return nil
 }
 
 type PinPeerCertificateRequest struct {
@@ -19363,6 +19381,377 @@ func (x *PinPeerCertificateResponse) GetLeaderHint() string {
 	return ""
 }
 
+// TransitionPeerCertificateRequest asks the Colony to stage a new
+// serving certificate for a Comb that is already pinned.
+//
+// The certificate's fingerprint and expiry are RE-DERIVED by the
+// managerd and again by every replica, so the values supplied here are
+// checked rather than trusted.
+type TransitionPeerCertificateRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// node_id is the Comb whose pinned certificate is being replaced. It
+	// must already be pinned.
+	NodeId string `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// next is the incoming certificate.
+	Next *TrustedPeer `protobuf:"bytes,2,opt,name=next,proto3" json:"next,omitempty"`
+	// overlap_seconds is how long both certificates remain trusted.
+	// It is bounded on purpose: an unbounded staged certificate is a
+	// permanent second trust anchor.
+	OverlapSeconds int64 `protobuf:"varint,3,opt,name=overlap_seconds,json=overlapSeconds,proto3" json:"overlap_seconds,omitempty"`
+	// reason is the operator's own account of why this certificate is
+	// being adopted. It is replicated with the transition, so an
+	// incident review can answer "why did this Comb's identity change".
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransitionPeerCertificateRequest) Reset() {
+	*x = TransitionPeerCertificateRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[249]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransitionPeerCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransitionPeerCertificateRequest) ProtoMessage() {}
+
+func (x *TransitionPeerCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[249]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransitionPeerCertificateRequest.ProtoReflect.Descriptor instead.
+func (*TransitionPeerCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{249}
+}
+
+func (x *TransitionPeerCertificateRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *TransitionPeerCertificateRequest) GetNext() *TrustedPeer {
+	if x != nil {
+		return x.Next
+	}
+	return nil
+}
+
+func (x *TransitionPeerCertificateRequest) GetOverlapSeconds() int64 {
+	if x != nil {
+		return x.OverlapSeconds
+	}
+	return 0
+}
+
+func (x *TransitionPeerCertificateRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type TransitionPeerCertificateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peer          *TrustedPeer           `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransitionPeerCertificateResponse) Reset() {
+	*x = TransitionPeerCertificateResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[250]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransitionPeerCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransitionPeerCertificateResponse) ProtoMessage() {}
+
+func (x *TransitionPeerCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[250]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransitionPeerCertificateResponse.ProtoReflect.Descriptor instead.
+func (*TransitionPeerCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{250}
+}
+
+func (x *TransitionPeerCertificateResponse) GetPeer() *TrustedPeer {
+	if x != nil {
+		return x.Peer
+	}
+	return nil
+}
+
+func (x *TransitionPeerCertificateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TransitionPeerCertificateResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
+// ActivatePeerCertificateTransitionRequest promotes a staged
+// certificate to current.
+type ActivatePeerCertificateTransitionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivatePeerCertificateTransitionRequest) Reset() {
+	*x = ActivatePeerCertificateTransitionRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[251]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivatePeerCertificateTransitionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivatePeerCertificateTransitionRequest) ProtoMessage() {}
+
+func (x *ActivatePeerCertificateTransitionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[251]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivatePeerCertificateTransitionRequest.ProtoReflect.Descriptor instead.
+func (*ActivatePeerCertificateTransitionRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{251}
+}
+
+func (x *ActivatePeerCertificateTransitionRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ActivatePeerCertificateTransitionRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ActivatePeerCertificateTransitionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peer          *TrustedPeer           `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivatePeerCertificateTransitionResponse) Reset() {
+	*x = ActivatePeerCertificateTransitionResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[252]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivatePeerCertificateTransitionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivatePeerCertificateTransitionResponse) ProtoMessage() {}
+
+func (x *ActivatePeerCertificateTransitionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[252]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivatePeerCertificateTransitionResponse.ProtoReflect.Descriptor instead.
+func (*ActivatePeerCertificateTransitionResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{252}
+}
+
+func (x *ActivatePeerCertificateTransitionResponse) GetPeer() *TrustedPeer {
+	if x != nil {
+		return x.Peer
+	}
+	return nil
+}
+
+func (x *ActivatePeerCertificateTransitionResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ActivatePeerCertificateTransitionResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
+// AbandonPeerCertificateTransitionRequest drops a staged certificate
+// and keeps the current one.
+type AbandonPeerCertificateTransitionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AbandonPeerCertificateTransitionRequest) Reset() {
+	*x = AbandonPeerCertificateTransitionRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[253]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbandonPeerCertificateTransitionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbandonPeerCertificateTransitionRequest) ProtoMessage() {}
+
+func (x *AbandonPeerCertificateTransitionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[253]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbandonPeerCertificateTransitionRequest.ProtoReflect.Descriptor instead.
+func (*AbandonPeerCertificateTransitionRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{253}
+}
+
+func (x *AbandonPeerCertificateTransitionRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *AbandonPeerCertificateTransitionRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type AbandonPeerCertificateTransitionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peer          *TrustedPeer           `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AbandonPeerCertificateTransitionResponse) Reset() {
+	*x = AbandonPeerCertificateTransitionResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[254]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbandonPeerCertificateTransitionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbandonPeerCertificateTransitionResponse) ProtoMessage() {}
+
+func (x *AbandonPeerCertificateTransitionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[254]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbandonPeerCertificateTransitionResponse.ProtoReflect.Descriptor instead.
+func (*AbandonPeerCertificateTransitionResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{254}
+}
+
+func (x *AbandonPeerCertificateTransitionResponse) GetPeer() *TrustedPeer {
+	if x != nil {
+		return x.Peer
+	}
+	return nil
+}
+
+func (x *AbandonPeerCertificateTransitionResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *AbandonPeerCertificateTransitionResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 type UnpinPeerCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
@@ -19373,7 +19762,7 @@ type UnpinPeerCertificateRequest struct {
 
 func (x *UnpinPeerCertificateRequest) Reset() {
 	*x = UnpinPeerCertificateRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[249]
+	mi := &file_api_rpc_manager_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19385,7 +19774,7 @@ func (x *UnpinPeerCertificateRequest) String() string {
 func (*UnpinPeerCertificateRequest) ProtoMessage() {}
 
 func (x *UnpinPeerCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[249]
+	mi := &file_api_rpc_manager_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19398,7 +19787,7 @@ func (x *UnpinPeerCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpinPeerCertificateRequest.ProtoReflect.Descriptor instead.
 func (*UnpinPeerCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{249}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *UnpinPeerCertificateRequest) GetNodeId() string {
@@ -19426,7 +19815,7 @@ type UnpinPeerCertificateResponse struct {
 
 func (x *UnpinPeerCertificateResponse) Reset() {
 	*x = UnpinPeerCertificateResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[250]
+	mi := &file_api_rpc_manager_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19438,7 +19827,7 @@ func (x *UnpinPeerCertificateResponse) String() string {
 func (*UnpinPeerCertificateResponse) ProtoMessage() {}
 
 func (x *UnpinPeerCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[250]
+	mi := &file_api_rpc_manager_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19451,7 +19840,7 @@ func (x *UnpinPeerCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpinPeerCertificateResponse.ProtoReflect.Descriptor instead.
 func (*UnpinPeerCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{250}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{256}
 }
 
 func (x *UnpinPeerCertificateResponse) GetPeer() *TrustedPeer {
@@ -19489,7 +19878,7 @@ type JoinApprovalAttestation struct {
 
 func (x *JoinApprovalAttestation) Reset() {
 	*x = JoinApprovalAttestation{}
-	mi := &file_api_rpc_manager_proto_msgTypes[251]
+	mi := &file_api_rpc_manager_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19501,7 +19890,7 @@ func (x *JoinApprovalAttestation) String() string {
 func (*JoinApprovalAttestation) ProtoMessage() {}
 
 func (x *JoinApprovalAttestation) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[251]
+	mi := &file_api_rpc_manager_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19514,7 +19903,7 @@ func (x *JoinApprovalAttestation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinApprovalAttestation.ProtoReflect.Descriptor instead.
 func (*JoinApprovalAttestation) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{251}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *JoinApprovalAttestation) GetKeyId() string {
@@ -19556,7 +19945,7 @@ type ColonyJoinWindow struct {
 
 func (x *ColonyJoinWindow) Reset() {
 	*x = ColonyJoinWindow{}
-	mi := &file_api_rpc_manager_proto_msgTypes[252]
+	mi := &file_api_rpc_manager_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19568,7 +19957,7 @@ func (x *ColonyJoinWindow) String() string {
 func (*ColonyJoinWindow) ProtoMessage() {}
 
 func (x *ColonyJoinWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[252]
+	mi := &file_api_rpc_manager_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19581,7 +19970,7 @@ func (x *ColonyJoinWindow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyJoinWindow.ProtoReflect.Descriptor instead.
 func (*ColonyJoinWindow) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{252}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *ColonyJoinWindow) GetEnabled() bool {
@@ -19637,7 +20026,7 @@ type OpenColonyJoinWindowRequest struct {
 
 func (x *OpenColonyJoinWindowRequest) Reset() {
 	*x = OpenColonyJoinWindowRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[253]
+	mi := &file_api_rpc_manager_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19649,7 +20038,7 @@ func (x *OpenColonyJoinWindowRequest) String() string {
 func (*OpenColonyJoinWindowRequest) ProtoMessage() {}
 
 func (x *OpenColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[253]
+	mi := &file_api_rpc_manager_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19662,7 +20051,7 @@ func (x *OpenColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenColonyJoinWindowRequest.ProtoReflect.Descriptor instead.
 func (*OpenColonyJoinWindowRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{253}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *OpenColonyJoinWindowRequest) GetDurationSeconds() int64 {
@@ -19696,7 +20085,7 @@ type OpenColonyJoinWindowResponse struct {
 
 func (x *OpenColonyJoinWindowResponse) Reset() {
 	*x = OpenColonyJoinWindowResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[254]
+	mi := &file_api_rpc_manager_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19708,7 +20097,7 @@ func (x *OpenColonyJoinWindowResponse) String() string {
 func (*OpenColonyJoinWindowResponse) ProtoMessage() {}
 
 func (x *OpenColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[254]
+	mi := &file_api_rpc_manager_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19721,7 +20110,7 @@ func (x *OpenColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenColonyJoinWindowResponse.ProtoReflect.Descriptor instead.
 func (*OpenColonyJoinWindowResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{254}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *OpenColonyJoinWindowResponse) GetWindow() *ColonyJoinWindow {
@@ -19761,7 +20150,7 @@ type CloseColonyJoinWindowRequest struct {
 
 func (x *CloseColonyJoinWindowRequest) Reset() {
 	*x = CloseColonyJoinWindowRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[255]
+	mi := &file_api_rpc_manager_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19773,7 +20162,7 @@ func (x *CloseColonyJoinWindowRequest) String() string {
 func (*CloseColonyJoinWindowRequest) ProtoMessage() {}
 
 func (x *CloseColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[255]
+	mi := &file_api_rpc_manager_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19786,7 +20175,7 @@ func (x *CloseColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseColonyJoinWindowRequest.ProtoReflect.Descriptor instead.
 func (*CloseColonyJoinWindowRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{255}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *CloseColonyJoinWindowRequest) GetTimeoutMs() uint32 {
@@ -19807,7 +20196,7 @@ type CloseColonyJoinWindowResponse struct {
 
 func (x *CloseColonyJoinWindowResponse) Reset() {
 	*x = CloseColonyJoinWindowResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[256]
+	mi := &file_api_rpc_manager_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19819,7 +20208,7 @@ func (x *CloseColonyJoinWindowResponse) String() string {
 func (*CloseColonyJoinWindowResponse) ProtoMessage() {}
 
 func (x *CloseColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[256]
+	mi := &file_api_rpc_manager_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19832,7 +20221,7 @@ func (x *CloseColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseColonyJoinWindowResponse.ProtoReflect.Descriptor instead.
 func (*CloseColonyJoinWindowResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{256}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{262}
 }
 
 func (x *CloseColonyJoinWindowResponse) GetWindow() *ColonyJoinWindow {
@@ -19871,7 +20260,7 @@ type ColonyDiskSize struct {
 
 func (x *ColonyDiskSize) Reset() {
 	*x = ColonyDiskSize{}
-	mi := &file_api_rpc_manager_proto_msgTypes[257]
+	mi := &file_api_rpc_manager_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19883,7 +20272,7 @@ func (x *ColonyDiskSize) String() string {
 func (*ColonyDiskSize) ProtoMessage() {}
 
 func (x *ColonyDiskSize) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[257]
+	mi := &file_api_rpc_manager_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19896,7 +20285,7 @@ func (x *ColonyDiskSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyDiskSize.ProtoReflect.Descriptor instead.
 func (*ColonyDiskSize) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{257}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *ColonyDiskSize) GetFloorMb() uint64 {
@@ -19941,7 +20330,7 @@ type SetColonyDiskSizeRequest struct {
 
 func (x *SetColonyDiskSizeRequest) Reset() {
 	*x = SetColonyDiskSizeRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[258]
+	mi := &file_api_rpc_manager_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19953,7 +20342,7 @@ func (x *SetColonyDiskSizeRequest) String() string {
 func (*SetColonyDiskSizeRequest) ProtoMessage() {}
 
 func (x *SetColonyDiskSizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[258]
+	mi := &file_api_rpc_manager_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19966,7 +20355,7 @@ func (x *SetColonyDiskSizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetColonyDiskSizeRequest.ProtoReflect.Descriptor instead.
 func (*SetColonyDiskSizeRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{258}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *SetColonyDiskSizeRequest) GetFloorMb() uint64 {
@@ -19997,7 +20386,7 @@ type SetColonyDiskSizeResponse struct {
 
 func (x *SetColonyDiskSizeResponse) Reset() {
 	*x = SetColonyDiskSizeResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[259]
+	mi := &file_api_rpc_manager_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20009,7 +20398,7 @@ func (x *SetColonyDiskSizeResponse) String() string {
 func (*SetColonyDiskSizeResponse) ProtoMessage() {}
 
 func (x *SetColonyDiskSizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[259]
+	mi := &file_api_rpc_manager_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20022,7 +20411,7 @@ func (x *SetColonyDiskSizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetColonyDiskSizeResponse.ProtoReflect.Descriptor instead.
 func (*SetColonyDiskSizeResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{259}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *SetColonyDiskSizeResponse) GetColonyDiskSize() *ColonyDiskSize {
@@ -20055,7 +20444,7 @@ type GetColonyDiskSizeRequest struct {
 
 func (x *GetColonyDiskSizeRequest) Reset() {
 	*x = GetColonyDiskSizeRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[260]
+	mi := &file_api_rpc_manager_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20067,7 +20456,7 @@ func (x *GetColonyDiskSizeRequest) String() string {
 func (*GetColonyDiskSizeRequest) ProtoMessage() {}
 
 func (x *GetColonyDiskSizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[260]
+	mi := &file_api_rpc_manager_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20080,7 +20469,7 @@ func (x *GetColonyDiskSizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetColonyDiskSizeRequest.ProtoReflect.Descriptor instead.
 func (*GetColonyDiskSizeRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{260}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{266}
 }
 
 func (x *GetColonyDiskSizeRequest) GetTimeoutMs() uint32 {
@@ -20104,7 +20493,7 @@ type GetColonyDiskSizeResponse struct {
 
 func (x *GetColonyDiskSizeResponse) Reset() {
 	*x = GetColonyDiskSizeResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[261]
+	mi := &file_api_rpc_manager_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20116,7 +20505,7 @@ func (x *GetColonyDiskSizeResponse) String() string {
 func (*GetColonyDiskSizeResponse) ProtoMessage() {}
 
 func (x *GetColonyDiskSizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[261]
+	mi := &file_api_rpc_manager_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20129,7 +20518,7 @@ func (x *GetColonyDiskSizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetColonyDiskSizeResponse.ProtoReflect.Descriptor instead.
 func (*GetColonyDiskSizeResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{261}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *GetColonyDiskSizeResponse) GetColonyDiskSize() *ColonyDiskSize {
@@ -20162,7 +20551,7 @@ type GetColonyJoinWindowRequest struct {
 
 func (x *GetColonyJoinWindowRequest) Reset() {
 	*x = GetColonyJoinWindowRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[262]
+	mi := &file_api_rpc_manager_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20174,7 +20563,7 @@ func (x *GetColonyJoinWindowRequest) String() string {
 func (*GetColonyJoinWindowRequest) ProtoMessage() {}
 
 func (x *GetColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[262]
+	mi := &file_api_rpc_manager_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20187,7 +20576,7 @@ func (x *GetColonyJoinWindowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetColonyJoinWindowRequest.ProtoReflect.Descriptor instead.
 func (*GetColonyJoinWindowRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{262}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{268}
 }
 
 func (x *GetColonyJoinWindowRequest) GetTargetAddress() string {
@@ -20234,7 +20623,7 @@ type GetColonyJoinWindowResponse struct {
 
 func (x *GetColonyJoinWindowResponse) Reset() {
 	*x = GetColonyJoinWindowResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[263]
+	mi := &file_api_rpc_manager_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20246,7 +20635,7 @@ func (x *GetColonyJoinWindowResponse) String() string {
 func (*GetColonyJoinWindowResponse) ProtoMessage() {}
 
 func (x *GetColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[263]
+	mi := &file_api_rpc_manager_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20259,7 +20648,7 @@ func (x *GetColonyJoinWindowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetColonyJoinWindowResponse.ProtoReflect.Descriptor instead.
 func (*GetColonyJoinWindowResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{263}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{269}
 }
 
 func (x *GetColonyJoinWindowResponse) GetWindow() *ColonyJoinWindow {
@@ -20321,7 +20710,7 @@ type RejectJoinRequestRequest struct {
 
 func (x *RejectJoinRequestRequest) Reset() {
 	*x = RejectJoinRequestRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[264]
+	mi := &file_api_rpc_manager_proto_msgTypes[270]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20333,7 +20722,7 @@ func (x *RejectJoinRequestRequest) String() string {
 func (*RejectJoinRequestRequest) ProtoMessage() {}
 
 func (x *RejectJoinRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[264]
+	mi := &file_api_rpc_manager_proto_msgTypes[270]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20346,7 +20735,7 @@ func (x *RejectJoinRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectJoinRequestRequest.ProtoReflect.Descriptor instead.
 func (*RejectJoinRequestRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{264}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{270}
 }
 
 func (x *RejectJoinRequestRequest) GetRequestId() string {
@@ -20374,7 +20763,7 @@ type RejectJoinRequestResponse struct {
 
 func (x *RejectJoinRequestResponse) Reset() {
 	*x = RejectJoinRequestResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[265]
+	mi := &file_api_rpc_manager_proto_msgTypes[271]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20386,7 +20775,7 @@ func (x *RejectJoinRequestResponse) String() string {
 func (*RejectJoinRequestResponse) ProtoMessage() {}
 
 func (x *RejectJoinRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[265]
+	mi := &file_api_rpc_manager_proto_msgTypes[271]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20399,7 +20788,7 @@ func (x *RejectJoinRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectJoinRequestResponse.ProtoReflect.Descriptor instead.
 func (*RejectJoinRequestResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{265}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{271}
 }
 
 func (x *RejectJoinRequestResponse) GetRequest() *PendingJoinRequest {
@@ -20438,7 +20827,7 @@ type CancelJoinRequestRequest struct {
 
 func (x *CancelJoinRequestRequest) Reset() {
 	*x = CancelJoinRequestRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[266]
+	mi := &file_api_rpc_manager_proto_msgTypes[272]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20450,7 +20839,7 @@ func (x *CancelJoinRequestRequest) String() string {
 func (*CancelJoinRequestRequest) ProtoMessage() {}
 
 func (x *CancelJoinRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[266]
+	mi := &file_api_rpc_manager_proto_msgTypes[272]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20463,7 +20852,7 @@ func (x *CancelJoinRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJoinRequestRequest.ProtoReflect.Descriptor instead.
 func (*CancelJoinRequestRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{266}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{272}
 }
 
 func (x *CancelJoinRequestRequest) GetRequestId() string {
@@ -20498,7 +20887,7 @@ type CancelJoinRequestResponse struct {
 
 func (x *CancelJoinRequestResponse) Reset() {
 	*x = CancelJoinRequestResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[267]
+	mi := &file_api_rpc_manager_proto_msgTypes[273]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20510,7 +20899,7 @@ func (x *CancelJoinRequestResponse) String() string {
 func (*CancelJoinRequestResponse) ProtoMessage() {}
 
 func (x *CancelJoinRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[267]
+	mi := &file_api_rpc_manager_proto_msgTypes[273]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20523,7 +20912,7 @@ func (x *CancelJoinRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJoinRequestResponse.ProtoReflect.Descriptor instead.
 func (*CancelJoinRequestResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{267}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{273}
 }
 
 func (x *CancelJoinRequestResponse) GetRequest() *PendingJoinRequest {
@@ -20557,7 +20946,7 @@ type PurgeJoinRequestRequest struct {
 
 func (x *PurgeJoinRequestRequest) Reset() {
 	*x = PurgeJoinRequestRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[268]
+	mi := &file_api_rpc_manager_proto_msgTypes[274]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20569,7 +20958,7 @@ func (x *PurgeJoinRequestRequest) String() string {
 func (*PurgeJoinRequestRequest) ProtoMessage() {}
 
 func (x *PurgeJoinRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[268]
+	mi := &file_api_rpc_manager_proto_msgTypes[274]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20582,7 +20971,7 @@ func (x *PurgeJoinRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeJoinRequestRequest.ProtoReflect.Descriptor instead.
 func (*PurgeJoinRequestRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{268}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{274}
 }
 
 func (x *PurgeJoinRequestRequest) GetRequestId() string {
@@ -20609,7 +20998,7 @@ type PurgeJoinRequestResponse struct {
 
 func (x *PurgeJoinRequestResponse) Reset() {
 	*x = PurgeJoinRequestResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[269]
+	mi := &file_api_rpc_manager_proto_msgTypes[275]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20621,7 +21010,7 @@ func (x *PurgeJoinRequestResponse) String() string {
 func (*PurgeJoinRequestResponse) ProtoMessage() {}
 
 func (x *PurgeJoinRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[269]
+	mi := &file_api_rpc_manager_proto_msgTypes[275]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20634,7 +21023,7 @@ func (x *PurgeJoinRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeJoinRequestResponse.ProtoReflect.Descriptor instead.
 func (*PurgeJoinRequestResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{269}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{275}
 }
 
 func (x *PurgeJoinRequestResponse) GetError() string {
@@ -20664,7 +21053,7 @@ type UpdateVoterAddressRequest struct {
 
 func (x *UpdateVoterAddressRequest) Reset() {
 	*x = UpdateVoterAddressRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[270]
+	mi := &file_api_rpc_manager_proto_msgTypes[276]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20676,7 +21065,7 @@ func (x *UpdateVoterAddressRequest) String() string {
 func (*UpdateVoterAddressRequest) ProtoMessage() {}
 
 func (x *UpdateVoterAddressRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[270]
+	mi := &file_api_rpc_manager_proto_msgTypes[276]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20689,7 +21078,7 @@ func (x *UpdateVoterAddressRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVoterAddressRequest.ProtoReflect.Descriptor instead.
 func (*UpdateVoterAddressRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{270}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{276}
 }
 
 func (x *UpdateVoterAddressRequest) GetNodeId() string {
@@ -20723,7 +21112,7 @@ type UpdateVoterAddressResponse struct {
 
 func (x *UpdateVoterAddressResponse) Reset() {
 	*x = UpdateVoterAddressResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[271]
+	mi := &file_api_rpc_manager_proto_msgTypes[277]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20735,7 +21124,7 @@ func (x *UpdateVoterAddressResponse) String() string {
 func (*UpdateVoterAddressResponse) ProtoMessage() {}
 
 func (x *UpdateVoterAddressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[271]
+	mi := &file_api_rpc_manager_proto_msgTypes[277]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20748,7 +21137,7 @@ func (x *UpdateVoterAddressResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVoterAddressResponse.ProtoReflect.Descriptor instead.
 func (*UpdateVoterAddressResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{271}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{277}
 }
 
 func (x *UpdateVoterAddressResponse) GetError() string {
@@ -20776,7 +21165,7 @@ type ClusterHealthRequest struct {
 
 func (x *ClusterHealthRequest) Reset() {
 	*x = ClusterHealthRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[272]
+	mi := &file_api_rpc_manager_proto_msgTypes[278]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20788,7 +21177,7 @@ func (x *ClusterHealthRequest) String() string {
 func (*ClusterHealthRequest) ProtoMessage() {}
 
 func (x *ClusterHealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[272]
+	mi := &file_api_rpc_manager_proto_msgTypes[278]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20801,7 +21190,7 @@ func (x *ClusterHealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterHealthRequest.ProtoReflect.Descriptor instead.
 func (*ClusterHealthRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{272}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{278}
 }
 
 // GetMonitoringClusterRequest asks for the CLUSTER-WIDE monitoring
@@ -20820,7 +21209,7 @@ type GetMonitoringClusterRequest struct {
 
 func (x *GetMonitoringClusterRequest) Reset() {
 	*x = GetMonitoringClusterRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[273]
+	mi := &file_api_rpc_manager_proto_msgTypes[279]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20832,7 +21221,7 @@ func (x *GetMonitoringClusterRequest) String() string {
 func (*GetMonitoringClusterRequest) ProtoMessage() {}
 
 func (x *GetMonitoringClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[273]
+	mi := &file_api_rpc_manager_proto_msgTypes[279]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20845,7 +21234,7 @@ func (x *GetMonitoringClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMonitoringClusterRequest.ProtoReflect.Descriptor instead.
 func (*GetMonitoringClusterRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{273}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{279}
 }
 
 // GetMonitoringNodesRequest asks for the PER-NODE monitoring summaries.
@@ -20857,7 +21246,7 @@ type GetMonitoringNodesRequest struct {
 
 func (x *GetMonitoringNodesRequest) Reset() {
 	*x = GetMonitoringNodesRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[274]
+	mi := &file_api_rpc_manager_proto_msgTypes[280]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20869,7 +21258,7 @@ func (x *GetMonitoringNodesRequest) String() string {
 func (*GetMonitoringNodesRequest) ProtoMessage() {}
 
 func (x *GetMonitoringNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[274]
+	mi := &file_api_rpc_manager_proto_msgTypes[280]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20882,7 +21271,7 @@ func (x *GetMonitoringNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMonitoringNodesRequest.ProtoReflect.Descriptor instead.
 func (*GetMonitoringNodesRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{274}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{280}
 }
 
 // MonitoringHealthStatus is the five-state health vocabulary, in the
@@ -20931,7 +21320,7 @@ type MonitoringHealthStatus struct {
 
 func (x *MonitoringHealthStatus) Reset() {
 	*x = MonitoringHealthStatus{}
-	mi := &file_api_rpc_manager_proto_msgTypes[275]
+	mi := &file_api_rpc_manager_proto_msgTypes[281]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20943,7 +21332,7 @@ func (x *MonitoringHealthStatus) String() string {
 func (*MonitoringHealthStatus) ProtoMessage() {}
 
 func (x *MonitoringHealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[275]
+	mi := &file_api_rpc_manager_proto_msgTypes[281]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20956,7 +21345,7 @@ func (x *MonitoringHealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MonitoringHealthStatus.ProtoReflect.Descriptor instead.
 func (*MonitoringHealthStatus) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{275}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{281}
 }
 
 func (x *MonitoringHealthStatus) GetStatus() string {
@@ -21026,7 +21415,7 @@ type MonitoringNodeReport struct {
 
 func (x *MonitoringNodeReport) Reset() {
 	*x = MonitoringNodeReport{}
-	mi := &file_api_rpc_manager_proto_msgTypes[276]
+	mi := &file_api_rpc_manager_proto_msgTypes[282]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21038,7 +21427,7 @@ func (x *MonitoringNodeReport) String() string {
 func (*MonitoringNodeReport) ProtoMessage() {}
 
 func (x *MonitoringNodeReport) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[276]
+	mi := &file_api_rpc_manager_proto_msgTypes[282]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21051,7 +21440,7 @@ func (x *MonitoringNodeReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MonitoringNodeReport.ProtoReflect.Descriptor instead.
 func (*MonitoringNodeReport) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{276}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{282}
 }
 
 func (x *MonitoringNodeReport) GetNodeId() string {
@@ -21150,7 +21539,7 @@ type GetMonitoringClusterResponse struct {
 
 func (x *GetMonitoringClusterResponse) Reset() {
 	*x = GetMonitoringClusterResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[277]
+	mi := &file_api_rpc_manager_proto_msgTypes[283]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21162,7 +21551,7 @@ func (x *GetMonitoringClusterResponse) String() string {
 func (*GetMonitoringClusterResponse) ProtoMessage() {}
 
 func (x *GetMonitoringClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[277]
+	mi := &file_api_rpc_manager_proto_msgTypes[283]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21175,7 +21564,7 @@ func (x *GetMonitoringClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMonitoringClusterResponse.ProtoReflect.Descriptor instead.
 func (*GetMonitoringClusterResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{277}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{283}
 }
 
 func (x *GetMonitoringClusterResponse) GetLocalNodeId() string {
@@ -21223,7 +21612,7 @@ type GetMonitoringNodesResponse struct {
 
 func (x *GetMonitoringNodesResponse) Reset() {
 	*x = GetMonitoringNodesResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[278]
+	mi := &file_api_rpc_manager_proto_msgTypes[284]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21235,7 +21624,7 @@ func (x *GetMonitoringNodesResponse) String() string {
 func (*GetMonitoringNodesResponse) ProtoMessage() {}
 
 func (x *GetMonitoringNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[278]
+	mi := &file_api_rpc_manager_proto_msgTypes[284]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21248,7 +21637,7 @@ func (x *GetMonitoringNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMonitoringNodesResponse.ProtoReflect.Descriptor instead.
 func (*GetMonitoringNodesResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{278}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{284}
 }
 
 func (x *GetMonitoringNodesResponse) GetLocalNodeId() string {
@@ -21326,7 +21715,7 @@ type ClusterNodeHealth struct {
 
 func (x *ClusterNodeHealth) Reset() {
 	*x = ClusterNodeHealth{}
-	mi := &file_api_rpc_manager_proto_msgTypes[279]
+	mi := &file_api_rpc_manager_proto_msgTypes[285]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21338,7 +21727,7 @@ func (x *ClusterNodeHealth) String() string {
 func (*ClusterNodeHealth) ProtoMessage() {}
 
 func (x *ClusterNodeHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[279]
+	mi := &file_api_rpc_manager_proto_msgTypes[285]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21351,7 +21740,7 @@ func (x *ClusterNodeHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterNodeHealth.ProtoReflect.Descriptor instead.
 func (*ClusterNodeHealth) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{279}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{285}
 }
 
 func (x *ClusterNodeHealth) GetNodeId() string {
@@ -21424,7 +21813,7 @@ type ClusterHealthResponse struct {
 
 func (x *ClusterHealthResponse) Reset() {
 	*x = ClusterHealthResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[280]
+	mi := &file_api_rpc_manager_proto_msgTypes[286]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21436,7 +21825,7 @@ func (x *ClusterHealthResponse) String() string {
 func (*ClusterHealthResponse) ProtoMessage() {}
 
 func (x *ClusterHealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[280]
+	mi := &file_api_rpc_manager_proto_msgTypes[286]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21449,7 +21838,7 @@ func (x *ClusterHealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterHealthResponse.ProtoReflect.Descriptor instead.
 func (*ClusterHealthResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{280}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{286}
 }
 
 func (x *ClusterHealthResponse) GetError() string {
@@ -21481,7 +21870,7 @@ type HostPackagesRequest struct {
 
 func (x *HostPackagesRequest) Reset() {
 	*x = HostPackagesRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[281]
+	mi := &file_api_rpc_manager_proto_msgTypes[287]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21493,7 +21882,7 @@ func (x *HostPackagesRequest) String() string {
 func (*HostPackagesRequest) ProtoMessage() {}
 
 func (x *HostPackagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[281]
+	mi := &file_api_rpc_manager_proto_msgTypes[287]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21506,7 +21895,7 @@ func (x *HostPackagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPackagesRequest.ProtoReflect.Descriptor instead.
 func (*HostPackagesRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{281}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{287}
 }
 
 type HostBaseSystem struct {
@@ -21546,7 +21935,7 @@ type HostBaseSystem struct {
 
 func (x *HostBaseSystem) Reset() {
 	*x = HostBaseSystem{}
-	mi := &file_api_rpc_manager_proto_msgTypes[282]
+	mi := &file_api_rpc_manager_proto_msgTypes[288]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21558,7 +21947,7 @@ func (x *HostBaseSystem) String() string {
 func (*HostBaseSystem) ProtoMessage() {}
 
 func (x *HostBaseSystem) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[282]
+	mi := &file_api_rpc_manager_proto_msgTypes[288]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21571,7 +21960,7 @@ func (x *HostBaseSystem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBaseSystem.ProtoReflect.Descriptor instead.
 func (*HostBaseSystem) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{282}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{288}
 }
 
 func (x *HostBaseSystem) GetKernelRelease() string {
@@ -21640,7 +22029,7 @@ type HostPackageCatalogue struct {
 
 func (x *HostPackageCatalogue) Reset() {
 	*x = HostPackageCatalogue{}
-	mi := &file_api_rpc_manager_proto_msgTypes[283]
+	mi := &file_api_rpc_manager_proto_msgTypes[289]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21652,7 +22041,7 @@ func (x *HostPackageCatalogue) String() string {
 func (*HostPackageCatalogue) ProtoMessage() {}
 
 func (x *HostPackageCatalogue) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[283]
+	mi := &file_api_rpc_manager_proto_msgTypes[289]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21665,7 +22054,7 @@ func (x *HostPackageCatalogue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPackageCatalogue.ProtoReflect.Descriptor instead.
 func (*HostPackageCatalogue) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{283}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{289}
 }
 
 func (x *HostPackageCatalogue) GetPath() string {
@@ -21730,7 +22119,7 @@ type HostInstalledPackage struct {
 
 func (x *HostInstalledPackage) Reset() {
 	*x = HostInstalledPackage{}
-	mi := &file_api_rpc_manager_proto_msgTypes[284]
+	mi := &file_api_rpc_manager_proto_msgTypes[290]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21742,7 +22131,7 @@ func (x *HostInstalledPackage) String() string {
 func (*HostInstalledPackage) ProtoMessage() {}
 
 func (x *HostInstalledPackage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[284]
+	mi := &file_api_rpc_manager_proto_msgTypes[290]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21755,7 +22144,7 @@ func (x *HostInstalledPackage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostInstalledPackage.ProtoReflect.Descriptor instead.
 func (*HostInstalledPackage) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{284}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{290}
 }
 
 func (x *HostInstalledPackage) GetName() string {
@@ -21816,7 +22205,7 @@ type HostPackageUnknown struct {
 
 func (x *HostPackageUnknown) Reset() {
 	*x = HostPackageUnknown{}
-	mi := &file_api_rpc_manager_proto_msgTypes[285]
+	mi := &file_api_rpc_manager_proto_msgTypes[291]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21828,7 +22217,7 @@ func (x *HostPackageUnknown) String() string {
 func (*HostPackageUnknown) ProtoMessage() {}
 
 func (x *HostPackageUnknown) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[285]
+	mi := &file_api_rpc_manager_proto_msgTypes[291]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21841,7 +22230,7 @@ func (x *HostPackageUnknown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPackageUnknown.ProtoReflect.Descriptor instead.
 func (*HostPackageUnknown) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{285}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{291}
 }
 
 func (x *HostPackageUnknown) GetSubject() string {
@@ -21901,7 +22290,7 @@ type HostPackagesResponse struct {
 
 func (x *HostPackagesResponse) Reset() {
 	*x = HostPackagesResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[286]
+	mi := &file_api_rpc_manager_proto_msgTypes[292]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21913,7 +22302,7 @@ func (x *HostPackagesResponse) String() string {
 func (*HostPackagesResponse) ProtoMessage() {}
 
 func (x *HostPackagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[286]
+	mi := &file_api_rpc_manager_proto_msgTypes[292]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21926,7 +22315,7 @@ func (x *HostPackagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPackagesResponse.ProtoReflect.Descriptor instead.
 func (*HostPackagesResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{286}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{292}
 }
 
 func (x *HostPackagesResponse) GetNodeId() string {
@@ -22020,7 +22409,7 @@ type ExecuteNodeRestartPlanRequest struct {
 
 func (x *ExecuteNodeRestartPlanRequest) Reset() {
 	*x = ExecuteNodeRestartPlanRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[287]
+	mi := &file_api_rpc_manager_proto_msgTypes[293]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22032,7 +22421,7 @@ func (x *ExecuteNodeRestartPlanRequest) String() string {
 func (*ExecuteNodeRestartPlanRequest) ProtoMessage() {}
 
 func (x *ExecuteNodeRestartPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[287]
+	mi := &file_api_rpc_manager_proto_msgTypes[293]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22045,7 +22434,7 @@ func (x *ExecuteNodeRestartPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteNodeRestartPlanRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteNodeRestartPlanRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{287}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{293}
 }
 
 func (x *ExecuteNodeRestartPlanRequest) GetNodeId() string {
@@ -22089,7 +22478,7 @@ type ExecuteNodeRestartPlanResponse struct {
 
 func (x *ExecuteNodeRestartPlanResponse) Reset() {
 	*x = ExecuteNodeRestartPlanResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[288]
+	mi := &file_api_rpc_manager_proto_msgTypes[294]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22101,7 +22490,7 @@ func (x *ExecuteNodeRestartPlanResponse) String() string {
 func (*ExecuteNodeRestartPlanResponse) ProtoMessage() {}
 
 func (x *ExecuteNodeRestartPlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[288]
+	mi := &file_api_rpc_manager_proto_msgTypes[294]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22114,7 +22503,7 @@ func (x *ExecuteNodeRestartPlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteNodeRestartPlanResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteNodeRestartPlanResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{288}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{294}
 }
 
 func (x *ExecuteNodeRestartPlanResponse) GetResult() *NodeRestartPlanResult {
@@ -22172,7 +22561,7 @@ type NodeRestartPlanResult struct {
 
 func (x *NodeRestartPlanResult) Reset() {
 	*x = NodeRestartPlanResult{}
-	mi := &file_api_rpc_manager_proto_msgTypes[289]
+	mi := &file_api_rpc_manager_proto_msgTypes[295]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22184,7 +22573,7 @@ func (x *NodeRestartPlanResult) String() string {
 func (*NodeRestartPlanResult) ProtoMessage() {}
 
 func (x *NodeRestartPlanResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[289]
+	mi := &file_api_rpc_manager_proto_msgTypes[295]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22197,7 +22586,7 @@ func (x *NodeRestartPlanResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeRestartPlanResult.ProtoReflect.Descriptor instead.
 func (*NodeRestartPlanResult) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{289}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{295}
 }
 
 func (x *NodeRestartPlanResult) GetService() string {
@@ -22289,7 +22678,7 @@ type NodeRestartPlanStepAside struct {
 
 func (x *NodeRestartPlanStepAside) Reset() {
 	*x = NodeRestartPlanStepAside{}
-	mi := &file_api_rpc_manager_proto_msgTypes[290]
+	mi := &file_api_rpc_manager_proto_msgTypes[296]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22301,7 +22690,7 @@ func (x *NodeRestartPlanStepAside) String() string {
 func (*NodeRestartPlanStepAside) ProtoMessage() {}
 
 func (x *NodeRestartPlanStepAside) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[290]
+	mi := &file_api_rpc_manager_proto_msgTypes[296]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22314,7 +22703,7 @@ func (x *NodeRestartPlanStepAside) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeRestartPlanStepAside.ProtoReflect.Descriptor instead.
 func (*NodeRestartPlanStepAside) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{290}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{296}
 }
 
 func (x *NodeRestartPlanStepAside) GetAttempted() bool {
@@ -22401,7 +22790,7 @@ type PushVMSnapshotToRequest struct {
 
 func (x *PushVMSnapshotToRequest) Reset() {
 	*x = PushVMSnapshotToRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[291]
+	mi := &file_api_rpc_manager_proto_msgTypes[297]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22413,7 +22802,7 @@ func (x *PushVMSnapshotToRequest) String() string {
 func (*PushVMSnapshotToRequest) ProtoMessage() {}
 
 func (x *PushVMSnapshotToRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[291]
+	mi := &file_api_rpc_manager_proto_msgTypes[297]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22426,7 +22815,7 @@ func (x *PushVMSnapshotToRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushVMSnapshotToRequest.ProtoReflect.Descriptor instead.
 func (*PushVMSnapshotToRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{291}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{297}
 }
 
 func (x *PushVMSnapshotToRequest) GetId() string {
@@ -22466,7 +22855,7 @@ type PushVMSnapshotToResponse struct {
 
 func (x *PushVMSnapshotToResponse) Reset() {
 	*x = PushVMSnapshotToResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[292]
+	mi := &file_api_rpc_manager_proto_msgTypes[298]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22478,7 +22867,7 @@ func (x *PushVMSnapshotToResponse) String() string {
 func (*PushVMSnapshotToResponse) ProtoMessage() {}
 
 func (x *PushVMSnapshotToResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[292]
+	mi := &file_api_rpc_manager_proto_msgTypes[298]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22491,7 +22880,7 @@ func (x *PushVMSnapshotToResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushVMSnapshotToResponse.ProtoReflect.Descriptor instead.
 func (*PushVMSnapshotToResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{292}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{298}
 }
 
 func (x *PushVMSnapshotToResponse) GetError() string {
@@ -22522,7 +22911,7 @@ type VMSnapshotMetadata struct {
 
 func (x *VMSnapshotMetadata) Reset() {
 	*x = VMSnapshotMetadata{}
-	mi := &file_api_rpc_manager_proto_msgTypes[293]
+	mi := &file_api_rpc_manager_proto_msgTypes[299]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22534,7 +22923,7 @@ func (x *VMSnapshotMetadata) String() string {
 func (*VMSnapshotMetadata) ProtoMessage() {}
 
 func (x *VMSnapshotMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[293]
+	mi := &file_api_rpc_manager_proto_msgTypes[299]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22547,7 +22936,7 @@ func (x *VMSnapshotMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VMSnapshotMetadata.ProtoReflect.Descriptor instead.
 func (*VMSnapshotMetadata) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{293}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{299}
 }
 
 func (x *VMSnapshotMetadata) GetId() string {
@@ -22584,7 +22973,7 @@ type ReceiveVMSnapshotRequest struct {
 
 func (x *ReceiveVMSnapshotRequest) Reset() {
 	*x = ReceiveVMSnapshotRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[294]
+	mi := &file_api_rpc_manager_proto_msgTypes[300]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22596,7 +22985,7 @@ func (x *ReceiveVMSnapshotRequest) String() string {
 func (*ReceiveVMSnapshotRequest) ProtoMessage() {}
 
 func (x *ReceiveVMSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[294]
+	mi := &file_api_rpc_manager_proto_msgTypes[300]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22609,7 +22998,7 @@ func (x *ReceiveVMSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReceiveVMSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*ReceiveVMSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{294}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{300}
 }
 
 func (x *ReceiveVMSnapshotRequest) GetData() isReceiveVMSnapshotRequest_Data {
@@ -22664,7 +23053,7 @@ type ReceiveVMSnapshotResponse struct {
 
 func (x *ReceiveVMSnapshotResponse) Reset() {
 	*x = ReceiveVMSnapshotResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[295]
+	mi := &file_api_rpc_manager_proto_msgTypes[301]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22676,7 +23065,7 @@ func (x *ReceiveVMSnapshotResponse) String() string {
 func (*ReceiveVMSnapshotResponse) ProtoMessage() {}
 
 func (x *ReceiveVMSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[295]
+	mi := &file_api_rpc_manager_proto_msgTypes[301]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22689,7 +23078,7 @@ func (x *ReceiveVMSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReceiveVMSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*ReceiveVMSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{295}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{301}
 }
 
 func (x *ReceiveVMSnapshotResponse) GetId() string {
@@ -22746,7 +23135,7 @@ type RequestManagerdRestartRequest struct {
 
 func (x *RequestManagerdRestartRequest) Reset() {
 	*x = RequestManagerdRestartRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[296]
+	mi := &file_api_rpc_manager_proto_msgTypes[302]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22758,7 +23147,7 @@ func (x *RequestManagerdRestartRequest) String() string {
 func (*RequestManagerdRestartRequest) ProtoMessage() {}
 
 func (x *RequestManagerdRestartRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[296]
+	mi := &file_api_rpc_manager_proto_msgTypes[302]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22771,7 +23160,7 @@ func (x *RequestManagerdRestartRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestManagerdRestartRequest.ProtoReflect.Descriptor instead.
 func (*RequestManagerdRestartRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{296}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{302}
 }
 
 func (x *RequestManagerdRestartRequest) GetTargetNodeId() string {
@@ -22825,7 +23214,7 @@ type RequestManagerdRestartResponse struct {
 
 func (x *RequestManagerdRestartResponse) Reset() {
 	*x = RequestManagerdRestartResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[297]
+	mi := &file_api_rpc_manager_proto_msgTypes[303]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22837,7 +23226,7 @@ func (x *RequestManagerdRestartResponse) String() string {
 func (*RequestManagerdRestartResponse) ProtoMessage() {}
 
 func (x *RequestManagerdRestartResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[297]
+	mi := &file_api_rpc_manager_proto_msgTypes[303]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22850,7 +23239,7 @@ func (x *RequestManagerdRestartResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestManagerdRestartResponse.ProtoReflect.Descriptor instead.
 func (*RequestManagerdRestartResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{297}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{303}
 }
 
 func (x *RequestManagerdRestartResponse) GetAccepted() bool {
@@ -22937,7 +23326,7 @@ type IssueManagerdRestartRequest struct {
 
 func (x *IssueManagerdRestartRequest) Reset() {
 	*x = IssueManagerdRestartRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[298]
+	mi := &file_api_rpc_manager_proto_msgTypes[304]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22949,7 +23338,7 @@ func (x *IssueManagerdRestartRequest) String() string {
 func (*IssueManagerdRestartRequest) ProtoMessage() {}
 
 func (x *IssueManagerdRestartRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[298]
+	mi := &file_api_rpc_manager_proto_msgTypes[304]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22962,7 +23351,7 @@ func (x *IssueManagerdRestartRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueManagerdRestartRequest.ProtoReflect.Descriptor instead.
 func (*IssueManagerdRestartRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{298}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{304}
 }
 
 func (x *IssueManagerdRestartRequest) GetTargetNodeId() string {
@@ -23057,7 +23446,7 @@ type IssueManagerdRestartResponse struct {
 
 func (x *IssueManagerdRestartResponse) Reset() {
 	*x = IssueManagerdRestartResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[299]
+	mi := &file_api_rpc_manager_proto_msgTypes[305]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23069,7 +23458,7 @@ func (x *IssueManagerdRestartResponse) String() string {
 func (*IssueManagerdRestartResponse) ProtoMessage() {}
 
 func (x *IssueManagerdRestartResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[299]
+	mi := &file_api_rpc_manager_proto_msgTypes[305]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23082,7 +23471,7 @@ func (x *IssueManagerdRestartResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueManagerdRestartResponse.ProtoReflect.Descriptor instead.
 func (*IssueManagerdRestartResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{299}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{305}
 }
 
 func (x *IssueManagerdRestartResponse) GetAccepted() bool {
@@ -24541,7 +24930,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\x12-\n" +
-	"\x12reissues_remaining\x18\x04 \x01(\rR\x11reissuesRemaining\"\x84\x02\n" +
+	"\x12reissues_remaining\x18\x04 \x01(\rR\x11reissuesRemaining\"\xb4\x02\n" +
 	"\vTrustedPeer\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tcomb_name\x18\x02 \x01(\tR\bcombName\x12 \n" +
@@ -24550,10 +24939,37 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0enot_after_unix\x18\x05 \x01(\x03R\fnotAfterUnix\x12$\n" +
 	"\x0epinned_at_unix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n" +
 	"\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n" +
-	"\bis_voter\x18\b \x01(\bR\aisVoter\"K\n" +
+	"\bis_voter\x18\b \x01(\bR\aisVoter\x12.\n" +
+	"\x04next\x18\t \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04next\"K\n" +
 	"\x19PinPeerCertificateRequest\x12.\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\"\x83\x01\n" +
 	"\x1aPinPeerCertificateResponse\x12.\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint\"\xac\x01\n" +
+	" TransitionPeerCertificateRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12.\n" +
+	"\x04next\x18\x02 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04next\x12'\n" +
+	"\x0foverlap_seconds\x18\x03 \x01(\x03R\x0eoverlapSeconds\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x8a\x01\n" +
+	"!TransitionPeerCertificateResponse\x12.\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint\"[\n" +
+	"(ActivatePeerCertificateTransitionRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x92\x01\n" +
+	")ActivatePeerCertificateTransitionResponse\x12.\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint\"Z\n" +
+	"'AbandonPeerCertificateTransitionRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x91\x01\n" +
+	"(AbandonPeerCertificateTransitionResponse\x12.\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
@@ -24929,7 +25345,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x19HostPackageCatalogueState\x12,\n" +
 	"(HOST_PACKAGE_CATALOGUE_STATE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"HOST_PACKAGE_CATALOGUE_STATE_FRESH\x10\x01\x12&\n" +
-	"\"HOST_PACKAGE_CATALOGUE_STATE_STALE\x10\x022\xe7`\n" +
+	"\"HOST_PACKAGE_CATALOGUE_STATE_STALE\x10\x022\x96d\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12o\n" +
 	"\x14AuthenticatePassword\x12*.apiary.rpc.v1.AuthenticatePasswordRequest\x1a+.apiary.rpc.v1.AuthenticatePasswordResponse\x12i\n" +
@@ -25043,7 +25459,10 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x16VerifyJoinIntroduction\x12,.apiary.rpc.v1.VerifyJoinIntroductionRequest\x1a-.apiary.rpc.v1.VerifyJoinIntroductionResponse\x12o\n" +
 	"\x14ReissueJoinSecondPin\x12*.apiary.rpc.v1.ReissueJoinSecondPinRequest\x1a+.apiary.rpc.v1.ReissueJoinSecondPinResponse\x12i\n" +
 	"\x12PinPeerCertificate\x12(.apiary.rpc.v1.PinPeerCertificateRequest\x1a).apiary.rpc.v1.PinPeerCertificateResponse\x12o\n" +
-	"\x14UnpinPeerCertificate\x12*.apiary.rpc.v1.UnpinPeerCertificateRequest\x1a+.apiary.rpc.v1.UnpinPeerCertificateResponse\x12\x84\x01\n" +
+	"\x14UnpinPeerCertificate\x12*.apiary.rpc.v1.UnpinPeerCertificateRequest\x1a+.apiary.rpc.v1.UnpinPeerCertificateResponse\x12~\n" +
+	"\x19TransitionPeerCertificate\x12/.apiary.rpc.v1.TransitionPeerCertificateRequest\x1a0.apiary.rpc.v1.TransitionPeerCertificateResponse\x12\x96\x01\n" +
+	"!ActivatePeerCertificateTransition\x127.apiary.rpc.v1.ActivatePeerCertificateTransitionRequest\x1a8.apiary.rpc.v1.ActivatePeerCertificateTransitionResponse\x12\x93\x01\n" +
+	" AbandonPeerCertificateTransition\x126.apiary.rpc.v1.AbandonPeerCertificateTransitionRequest\x1a7.apiary.rpc.v1.AbandonPeerCertificateTransitionResponse\x12\x84\x01\n" +
 	"\x1bPreflightApproveJoinRequest\x121.apiary.rpc.v1.PreflightApproveJoinRequestRequest\x1a2.apiary.rpc.v1.PreflightApproveJoinRequestResponse\x12f\n" +
 	"\x11CancelJoinRequest\x12'.apiary.rpc.v1.CancelJoinRequestRequest\x1a(.apiary.rpc.v1.CancelJoinRequestResponse\x12c\n" +
 	"\x10PurgeJoinRequest\x12&.apiary.rpc.v1.PurgeJoinRequestRequest\x1a'.apiary.rpc.v1.PurgeJoinRequestResponse\x12o\n" +
@@ -25068,7 +25487,7 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 }
 
 var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 19)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 301)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 307)
 var file_api_rpc_manager_proto_goTypes = []any{
 	(VMState)(0),                                        // 0: apiary.rpc.v1.VMState
 	(VMPhase)(0),                                        // 1: apiary.rpc.v1.VMPhase
@@ -25338,58 +25757,64 @@ var file_api_rpc_manager_proto_goTypes = []any{
 	(*TrustedPeer)(nil),                                 // 265: apiary.rpc.v1.TrustedPeer
 	(*PinPeerCertificateRequest)(nil),                   // 266: apiary.rpc.v1.PinPeerCertificateRequest
 	(*PinPeerCertificateResponse)(nil),                  // 267: apiary.rpc.v1.PinPeerCertificateResponse
-	(*UnpinPeerCertificateRequest)(nil),                 // 268: apiary.rpc.v1.UnpinPeerCertificateRequest
-	(*UnpinPeerCertificateResponse)(nil),                // 269: apiary.rpc.v1.UnpinPeerCertificateResponse
-	(*JoinApprovalAttestation)(nil),                     // 270: apiary.rpc.v1.JoinApprovalAttestation
-	(*ColonyJoinWindow)(nil),                            // 271: apiary.rpc.v1.ColonyJoinWindow
-	(*OpenColonyJoinWindowRequest)(nil),                 // 272: apiary.rpc.v1.OpenColonyJoinWindowRequest
-	(*OpenColonyJoinWindowResponse)(nil),                // 273: apiary.rpc.v1.OpenColonyJoinWindowResponse
-	(*CloseColonyJoinWindowRequest)(nil),                // 274: apiary.rpc.v1.CloseColonyJoinWindowRequest
-	(*CloseColonyJoinWindowResponse)(nil),               // 275: apiary.rpc.v1.CloseColonyJoinWindowResponse
-	(*ColonyDiskSize)(nil),                              // 276: apiary.rpc.v1.ColonyDiskSize
-	(*SetColonyDiskSizeRequest)(nil),                    // 277: apiary.rpc.v1.SetColonyDiskSizeRequest
-	(*SetColonyDiskSizeResponse)(nil),                   // 278: apiary.rpc.v1.SetColonyDiskSizeResponse
-	(*GetColonyDiskSizeRequest)(nil),                    // 279: apiary.rpc.v1.GetColonyDiskSizeRequest
-	(*GetColonyDiskSizeResponse)(nil),                   // 280: apiary.rpc.v1.GetColonyDiskSizeResponse
-	(*GetColonyJoinWindowRequest)(nil),                  // 281: apiary.rpc.v1.GetColonyJoinWindowRequest
-	(*GetColonyJoinWindowResponse)(nil),                 // 282: apiary.rpc.v1.GetColonyJoinWindowResponse
-	(*RejectJoinRequestRequest)(nil),                    // 283: apiary.rpc.v1.RejectJoinRequestRequest
-	(*RejectJoinRequestResponse)(nil),                   // 284: apiary.rpc.v1.RejectJoinRequestResponse
-	(*CancelJoinRequestRequest)(nil),                    // 285: apiary.rpc.v1.CancelJoinRequestRequest
-	(*CancelJoinRequestResponse)(nil),                   // 286: apiary.rpc.v1.CancelJoinRequestResponse
-	(*PurgeJoinRequestRequest)(nil),                     // 287: apiary.rpc.v1.PurgeJoinRequestRequest
-	(*PurgeJoinRequestResponse)(nil),                    // 288: apiary.rpc.v1.PurgeJoinRequestResponse
-	(*UpdateVoterAddressRequest)(nil),                   // 289: apiary.rpc.v1.UpdateVoterAddressRequest
-	(*UpdateVoterAddressResponse)(nil),                  // 290: apiary.rpc.v1.UpdateVoterAddressResponse
-	(*ClusterHealthRequest)(nil),                        // 291: apiary.rpc.v1.ClusterHealthRequest
-	(*GetMonitoringClusterRequest)(nil),                 // 292: apiary.rpc.v1.GetMonitoringClusterRequest
-	(*GetMonitoringNodesRequest)(nil),                   // 293: apiary.rpc.v1.GetMonitoringNodesRequest
-	(*MonitoringHealthStatus)(nil),                      // 294: apiary.rpc.v1.MonitoringHealthStatus
-	(*MonitoringNodeReport)(nil),                        // 295: apiary.rpc.v1.MonitoringNodeReport
-	(*GetMonitoringClusterResponse)(nil),                // 296: apiary.rpc.v1.GetMonitoringClusterResponse
-	(*GetMonitoringNodesResponse)(nil),                  // 297: apiary.rpc.v1.GetMonitoringNodesResponse
-	(*ClusterNodeHealth)(nil),                           // 298: apiary.rpc.v1.ClusterNodeHealth
-	(*ClusterHealthResponse)(nil),                       // 299: apiary.rpc.v1.ClusterHealthResponse
-	(*HostPackagesRequest)(nil),                         // 300: apiary.rpc.v1.HostPackagesRequest
-	(*HostBaseSystem)(nil),                              // 301: apiary.rpc.v1.HostBaseSystem
-	(*HostPackageCatalogue)(nil),                        // 302: apiary.rpc.v1.HostPackageCatalogue
-	(*HostInstalledPackage)(nil),                        // 303: apiary.rpc.v1.HostInstalledPackage
-	(*HostPackageUnknown)(nil),                          // 304: apiary.rpc.v1.HostPackageUnknown
-	(*HostPackagesResponse)(nil),                        // 305: apiary.rpc.v1.HostPackagesResponse
-	(*ExecuteNodeRestartPlanRequest)(nil),               // 306: apiary.rpc.v1.ExecuteNodeRestartPlanRequest
-	(*ExecuteNodeRestartPlanResponse)(nil),              // 307: apiary.rpc.v1.ExecuteNodeRestartPlanResponse
-	(*NodeRestartPlanResult)(nil),                       // 308: apiary.rpc.v1.NodeRestartPlanResult
-	(*NodeRestartPlanStepAside)(nil),                    // 309: apiary.rpc.v1.NodeRestartPlanStepAside
-	(*PushVMSnapshotToRequest)(nil),                     // 310: apiary.rpc.v1.PushVMSnapshotToRequest
-	(*PushVMSnapshotToResponse)(nil),                    // 311: apiary.rpc.v1.PushVMSnapshotToResponse
-	(*VMSnapshotMetadata)(nil),                          // 312: apiary.rpc.v1.VMSnapshotMetadata
-	(*ReceiveVMSnapshotRequest)(nil),                    // 313: apiary.rpc.v1.ReceiveVMSnapshotRequest
-	(*ReceiveVMSnapshotResponse)(nil),                   // 314: apiary.rpc.v1.ReceiveVMSnapshotResponse
-	(*RequestManagerdRestartRequest)(nil),               // 315: apiary.rpc.v1.RequestManagerdRestartRequest
-	(*RequestManagerdRestartResponse)(nil),              // 316: apiary.rpc.v1.RequestManagerdRestartResponse
-	(*IssueManagerdRestartRequest)(nil),                 // 317: apiary.rpc.v1.IssueManagerdRestartRequest
-	(*IssueManagerdRestartResponse)(nil),                // 318: apiary.rpc.v1.IssueManagerdRestartResponse
-	nil,                                                 // 319: apiary.rpc.v1.GetColonyJoinWindowResponse.ManagerdFingerprintsEntry
+	(*TransitionPeerCertificateRequest)(nil),            // 268: apiary.rpc.v1.TransitionPeerCertificateRequest
+	(*TransitionPeerCertificateResponse)(nil),           // 269: apiary.rpc.v1.TransitionPeerCertificateResponse
+	(*ActivatePeerCertificateTransitionRequest)(nil),    // 270: apiary.rpc.v1.ActivatePeerCertificateTransitionRequest
+	(*ActivatePeerCertificateTransitionResponse)(nil),   // 271: apiary.rpc.v1.ActivatePeerCertificateTransitionResponse
+	(*AbandonPeerCertificateTransitionRequest)(nil),     // 272: apiary.rpc.v1.AbandonPeerCertificateTransitionRequest
+	(*AbandonPeerCertificateTransitionResponse)(nil),    // 273: apiary.rpc.v1.AbandonPeerCertificateTransitionResponse
+	(*UnpinPeerCertificateRequest)(nil),                 // 274: apiary.rpc.v1.UnpinPeerCertificateRequest
+	(*UnpinPeerCertificateResponse)(nil),                // 275: apiary.rpc.v1.UnpinPeerCertificateResponse
+	(*JoinApprovalAttestation)(nil),                     // 276: apiary.rpc.v1.JoinApprovalAttestation
+	(*ColonyJoinWindow)(nil),                            // 277: apiary.rpc.v1.ColonyJoinWindow
+	(*OpenColonyJoinWindowRequest)(nil),                 // 278: apiary.rpc.v1.OpenColonyJoinWindowRequest
+	(*OpenColonyJoinWindowResponse)(nil),                // 279: apiary.rpc.v1.OpenColonyJoinWindowResponse
+	(*CloseColonyJoinWindowRequest)(nil),                // 280: apiary.rpc.v1.CloseColonyJoinWindowRequest
+	(*CloseColonyJoinWindowResponse)(nil),               // 281: apiary.rpc.v1.CloseColonyJoinWindowResponse
+	(*ColonyDiskSize)(nil),                              // 282: apiary.rpc.v1.ColonyDiskSize
+	(*SetColonyDiskSizeRequest)(nil),                    // 283: apiary.rpc.v1.SetColonyDiskSizeRequest
+	(*SetColonyDiskSizeResponse)(nil),                   // 284: apiary.rpc.v1.SetColonyDiskSizeResponse
+	(*GetColonyDiskSizeRequest)(nil),                    // 285: apiary.rpc.v1.GetColonyDiskSizeRequest
+	(*GetColonyDiskSizeResponse)(nil),                   // 286: apiary.rpc.v1.GetColonyDiskSizeResponse
+	(*GetColonyJoinWindowRequest)(nil),                  // 287: apiary.rpc.v1.GetColonyJoinWindowRequest
+	(*GetColonyJoinWindowResponse)(nil),                 // 288: apiary.rpc.v1.GetColonyJoinWindowResponse
+	(*RejectJoinRequestRequest)(nil),                    // 289: apiary.rpc.v1.RejectJoinRequestRequest
+	(*RejectJoinRequestResponse)(nil),                   // 290: apiary.rpc.v1.RejectJoinRequestResponse
+	(*CancelJoinRequestRequest)(nil),                    // 291: apiary.rpc.v1.CancelJoinRequestRequest
+	(*CancelJoinRequestResponse)(nil),                   // 292: apiary.rpc.v1.CancelJoinRequestResponse
+	(*PurgeJoinRequestRequest)(nil),                     // 293: apiary.rpc.v1.PurgeJoinRequestRequest
+	(*PurgeJoinRequestResponse)(nil),                    // 294: apiary.rpc.v1.PurgeJoinRequestResponse
+	(*UpdateVoterAddressRequest)(nil),                   // 295: apiary.rpc.v1.UpdateVoterAddressRequest
+	(*UpdateVoterAddressResponse)(nil),                  // 296: apiary.rpc.v1.UpdateVoterAddressResponse
+	(*ClusterHealthRequest)(nil),                        // 297: apiary.rpc.v1.ClusterHealthRequest
+	(*GetMonitoringClusterRequest)(nil),                 // 298: apiary.rpc.v1.GetMonitoringClusterRequest
+	(*GetMonitoringNodesRequest)(nil),                   // 299: apiary.rpc.v1.GetMonitoringNodesRequest
+	(*MonitoringHealthStatus)(nil),                      // 300: apiary.rpc.v1.MonitoringHealthStatus
+	(*MonitoringNodeReport)(nil),                        // 301: apiary.rpc.v1.MonitoringNodeReport
+	(*GetMonitoringClusterResponse)(nil),                // 302: apiary.rpc.v1.GetMonitoringClusterResponse
+	(*GetMonitoringNodesResponse)(nil),                  // 303: apiary.rpc.v1.GetMonitoringNodesResponse
+	(*ClusterNodeHealth)(nil),                           // 304: apiary.rpc.v1.ClusterNodeHealth
+	(*ClusterHealthResponse)(nil),                       // 305: apiary.rpc.v1.ClusterHealthResponse
+	(*HostPackagesRequest)(nil),                         // 306: apiary.rpc.v1.HostPackagesRequest
+	(*HostBaseSystem)(nil),                              // 307: apiary.rpc.v1.HostBaseSystem
+	(*HostPackageCatalogue)(nil),                        // 308: apiary.rpc.v1.HostPackageCatalogue
+	(*HostInstalledPackage)(nil),                        // 309: apiary.rpc.v1.HostInstalledPackage
+	(*HostPackageUnknown)(nil),                          // 310: apiary.rpc.v1.HostPackageUnknown
+	(*HostPackagesResponse)(nil),                        // 311: apiary.rpc.v1.HostPackagesResponse
+	(*ExecuteNodeRestartPlanRequest)(nil),               // 312: apiary.rpc.v1.ExecuteNodeRestartPlanRequest
+	(*ExecuteNodeRestartPlanResponse)(nil),              // 313: apiary.rpc.v1.ExecuteNodeRestartPlanResponse
+	(*NodeRestartPlanResult)(nil),                       // 314: apiary.rpc.v1.NodeRestartPlanResult
+	(*NodeRestartPlanStepAside)(nil),                    // 315: apiary.rpc.v1.NodeRestartPlanStepAside
+	(*PushVMSnapshotToRequest)(nil),                     // 316: apiary.rpc.v1.PushVMSnapshotToRequest
+	(*PushVMSnapshotToResponse)(nil),                    // 317: apiary.rpc.v1.PushVMSnapshotToResponse
+	(*VMSnapshotMetadata)(nil),                          // 318: apiary.rpc.v1.VMSnapshotMetadata
+	(*ReceiveVMSnapshotRequest)(nil),                    // 319: apiary.rpc.v1.ReceiveVMSnapshotRequest
+	(*ReceiveVMSnapshotResponse)(nil),                   // 320: apiary.rpc.v1.ReceiveVMSnapshotResponse
+	(*RequestManagerdRestartRequest)(nil),               // 321: apiary.rpc.v1.RequestManagerdRestartRequest
+	(*RequestManagerdRestartResponse)(nil),              // 322: apiary.rpc.v1.RequestManagerdRestartResponse
+	(*IssueManagerdRestartRequest)(nil),                 // 323: apiary.rpc.v1.IssueManagerdRestartRequest
+	(*IssueManagerdRestartResponse)(nil),                // 324: apiary.rpc.v1.IssueManagerdRestartResponse
+	nil,                                                 // 325: apiary.rpc.v1.GetColonyJoinWindowResponse.ManagerdFingerprintsEntry
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,   // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
@@ -25519,292 +25944,303 @@ var file_api_rpc_manager_proto_depIdxs = []int32{
 	238, // 124: apiary.rpc.v1.ListAssumptionResultsResponse.history:type_name -> apiary.rpc.v1.AssumptionHistoryEntry
 	244, // 125: apiary.rpc.v1.ListOrphanedHASTResourcesResponse.resources:type_name -> apiary.rpc.v1.OrphanedHASTResource
 	15,  // 126: apiary.rpc.v1.PendingJoinRequest.status:type_name -> apiary.rpc.v1.JoinRequestStatus
-	270, // 127: apiary.rpc.v1.PendingJoinRequest.approval_1:type_name -> apiary.rpc.v1.JoinApprovalAttestation
-	270, // 128: apiary.rpc.v1.PendingJoinRequest.approval_2:type_name -> apiary.rpc.v1.JoinApprovalAttestation
+	276, // 127: apiary.rpc.v1.PendingJoinRequest.approval_1:type_name -> apiary.rpc.v1.JoinApprovalAttestation
+	276, // 128: apiary.rpc.v1.PendingJoinRequest.approval_2:type_name -> apiary.rpc.v1.JoinApprovalAttestation
 	16,  // 129: apiary.rpc.v1.PendingJoinRequest.stage:type_name -> apiary.rpc.v1.JoinRequestStage
 	250, // 130: apiary.rpc.v1.GetJoinRequestStatusResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
 	250, // 131: apiary.rpc.v1.ListJoinRequestsResponse.requests:type_name -> apiary.rpc.v1.PendingJoinRequest
 	250, // 132: apiary.rpc.v1.ApproveJoinRequestResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
 	250, // 133: apiary.rpc.v1.VerifyJoinIntroductionResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
 	250, // 134: apiary.rpc.v1.ReissueJoinSecondPinResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
-	265, // 135: apiary.rpc.v1.PinPeerCertificateRequest.peer:type_name -> apiary.rpc.v1.TrustedPeer
-	265, // 136: apiary.rpc.v1.PinPeerCertificateResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
-	265, // 137: apiary.rpc.v1.UnpinPeerCertificateResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
-	271, // 138: apiary.rpc.v1.OpenColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
-	271, // 139: apiary.rpc.v1.CloseColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
-	276, // 140: apiary.rpc.v1.SetColonyDiskSizeResponse.colony_disk_size:type_name -> apiary.rpc.v1.ColonyDiskSize
-	276, // 141: apiary.rpc.v1.GetColonyDiskSizeResponse.colony_disk_size:type_name -> apiary.rpc.v1.ColonyDiskSize
-	271, // 142: apiary.rpc.v1.GetColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
-	319, // 143: apiary.rpc.v1.GetColonyJoinWindowResponse.managerd_fingerprints:type_name -> apiary.rpc.v1.GetColonyJoinWindowResponse.ManagerdFingerprintsEntry
-	250, // 144: apiary.rpc.v1.RejectJoinRequestResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
-	250, // 145: apiary.rpc.v1.CancelJoinRequestResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
-	294, // 146: apiary.rpc.v1.MonitoringNodeReport.health:type_name -> apiary.rpc.v1.MonitoringHealthStatus
-	98,  // 147: apiary.rpc.v1.MonitoringNodeReport.cpu:type_name -> apiary.rpc.v1.CPUStats
-	99,  // 148: apiary.rpc.v1.MonitoringNodeReport.mem:type_name -> apiary.rpc.v1.MemStats
-	100, // 149: apiary.rpc.v1.MonitoringNodeReport.pools:type_name -> apiary.rpc.v1.PoolStats
-	101, // 150: apiary.rpc.v1.MonitoringNodeReport.disks:type_name -> apiary.rpc.v1.DiskStats
-	102, // 151: apiary.rpc.v1.MonitoringNodeReport.net:type_name -> apiary.rpc.v1.NetIfaceStats
-	294, // 152: apiary.rpc.v1.GetMonitoringClusterResponse.health:type_name -> apiary.rpc.v1.MonitoringHealthStatus
-	295, // 153: apiary.rpc.v1.GetMonitoringClusterResponse.nodes:type_name -> apiary.rpc.v1.MonitoringNodeReport
-	295, // 154: apiary.rpc.v1.GetMonitoringNodesResponse.nodes:type_name -> apiary.rpc.v1.MonitoringNodeReport
-	56,  // 155: apiary.rpc.v1.ClusterNodeHealth.observations:type_name -> apiary.rpc.v1.HealthObservation
-	298, // 156: apiary.rpc.v1.ClusterHealthResponse.nodes:type_name -> apiary.rpc.v1.ClusterNodeHealth
-	17,  // 157: apiary.rpc.v1.HostBaseSystem.update_status:type_name -> apiary.rpc.v1.HostPackageUpdateStatus
-	18,  // 158: apiary.rpc.v1.HostPackageCatalogue.state:type_name -> apiary.rpc.v1.HostPackageCatalogueState
-	17,  // 159: apiary.rpc.v1.HostInstalledPackage.update_status:type_name -> apiary.rpc.v1.HostPackageUpdateStatus
-	301, // 160: apiary.rpc.v1.HostPackagesResponse.base:type_name -> apiary.rpc.v1.HostBaseSystem
-	302, // 161: apiary.rpc.v1.HostPackagesResponse.catalogue:type_name -> apiary.rpc.v1.HostPackageCatalogue
-	303, // 162: apiary.rpc.v1.HostPackagesResponse.ports:type_name -> apiary.rpc.v1.HostInstalledPackage
-	304, // 163: apiary.rpc.v1.HostPackagesResponse.unknown:type_name -> apiary.rpc.v1.HostPackageUnknown
-	308, // 164: apiary.rpc.v1.ExecuteNodeRestartPlanResponse.result:type_name -> apiary.rpc.v1.NodeRestartPlanResult
-	309, // 165: apiary.rpc.v1.NodeRestartPlanResult.step_aside:type_name -> apiary.rpc.v1.NodeRestartPlanStepAside
-	312, // 166: apiary.rpc.v1.ReceiveVMSnapshotRequest.metadata:type_name -> apiary.rpc.v1.VMSnapshotMetadata
-	166, // 167: apiary.rpc.v1.RequestManagerdRestartRequest.fence:type_name -> apiary.rpc.v1.ColonyUpdateFence
-	318, // 168: apiary.rpc.v1.RequestManagerdRestartResponse.issued:type_name -> apiary.rpc.v1.IssueManagerdRestartResponse
-	166, // 169: apiary.rpc.v1.IssueManagerdRestartRequest.fence:type_name -> apiary.rpc.v1.ColonyUpdateFence
-	51,  // 170: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	53,  // 171: apiary.rpc.v1.ManagerService.AuthenticatePassword:input_type -> apiary.rpc.v1.AuthenticatePasswordRequest
-	55,  // 172: apiary.rpc.v1.ManagerService.GetLocalNodeHealth:input_type -> apiary.rpc.v1.GetLocalNodeHealthRequest
-	59,  // 173: apiary.rpc.v1.ManagerService.ListAssumptionClaims:input_type -> apiary.rpc.v1.ListAssumptionClaimsRequest
-	61,  // 174: apiary.rpc.v1.ManagerService.SaveAssumptionClaim:input_type -> apiary.rpc.v1.SaveAssumptionClaimRequest
-	63,  // 175: apiary.rpc.v1.ManagerService.DeleteAssumptionClaim:input_type -> apiary.rpc.v1.DeleteAssumptionClaimRequest
-	66,  // 176: apiary.rpc.v1.ManagerService.ListOriginCertificates:input_type -> apiary.rpc.v1.ListOriginCertificatesRequest
-	68,  // 177: apiary.rpc.v1.ManagerService.IssueOriginCertificate:input_type -> apiary.rpc.v1.IssueOriginCertificateRequest
-	71,  // 178: apiary.rpc.v1.ManagerService.ListLetsEncryptCertificates:input_type -> apiary.rpc.v1.ListLetsEncryptCertificatesRequest
-	73,  // 179: apiary.rpc.v1.ManagerService.IssueLetsEncryptCertificate:input_type -> apiary.rpc.v1.IssueLetsEncryptCertificateRequest
-	23,  // 180: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	25,  // 181: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	29,  // 182: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	27,  // 183: apiary.rpc.v1.ManagerService.RenameVMIdentity:input_type -> apiary.rpc.v1.RenameVMIdentityRequest
-	31,  // 184: apiary.rpc.v1.ManagerService.ForcePurgeVM:input_type -> apiary.rpc.v1.ForcePurgeVMRequest
-	33,  // 185: apiary.rpc.v1.ManagerService.MigrateVM:input_type -> apiary.rpc.v1.MigrateVMRequest
-	35,  // 186: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:input_type -> apiary.rpc.v1.SetVMFirewallPausedRequest
-	37,  // 187: apiary.rpc.v1.ManagerService.SetVMCloudflareExposure:input_type -> apiary.rpc.v1.SetVMCloudflareExposureRequest
-	39,  // 188: apiary.rpc.v1.ManagerService.SetVMDesiredState:input_type -> apiary.rpc.v1.SetVMDesiredStateRequest
-	41,  // 189: apiary.rpc.v1.ManagerService.SetVMFirewallRules:input_type -> apiary.rpc.v1.SetVMFirewallRulesRequest
-	43,  // 190: apiary.rpc.v1.ManagerService.SetVMConfig:input_type -> apiary.rpc.v1.SetVMConfigRequest
-	45,  // 191: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
-	47,  // 192: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
-	49,  // 193: apiary.rpc.v1.ManagerService.ListVMsLocal:input_type -> apiary.rpc.v1.ListVMsLocalRequest
-	76,  // 194: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
-	79,  // 195: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
-	82,  // 196: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
-	84,  // 197: apiary.rpc.v1.ManagerService.UpdateISOComment:input_type -> apiary.rpc.v1.UpdateISOCommentRequest
-	86,  // 198: apiary.rpc.v1.ManagerService.SetISODefaultSizeMB:input_type -> apiary.rpc.v1.SetISODefaultSizeMBRequest
-	97,  // 199: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
-	105, // 200: apiary.rpc.v1.ManagerService.GetLocalHASTResourceStatus:input_type -> apiary.rpc.v1.GetLocalHASTResourceStatusRequest
-	291, // 201: apiary.rpc.v1.ManagerService.ClusterHealth:input_type -> apiary.rpc.v1.ClusterHealthRequest
-	292, // 202: apiary.rpc.v1.ManagerService.GetMonitoringCluster:input_type -> apiary.rpc.v1.GetMonitoringClusterRequest
-	293, // 203: apiary.rpc.v1.ManagerService.GetMonitoringNodes:input_type -> apiary.rpc.v1.GetMonitoringNodesRequest
-	107, // 204: apiary.rpc.v1.ManagerService.GetVMConsole:input_type -> apiary.rpc.v1.GetVMConsoleRequest
-	110, // 205: apiary.rpc.v1.ManagerService.ProxyVMConsole:input_type -> apiary.rpc.v1.VMConsoleTunnelFrame
-	111, // 206: apiary.rpc.v1.ManagerService.GetVMSerialLog:input_type -> apiary.rpc.v1.GetVMSerialLogRequest
-	113, // 207: apiary.rpc.v1.ManagerService.GetNodeConfig:input_type -> apiary.rpc.v1.GetNodeConfigRequest
-	121, // 208: apiary.rpc.v1.ManagerService.UpdateNodeConfig:input_type -> apiary.rpc.v1.UpdateNodeConfigRequest
-	116, // 209: apiary.rpc.v1.ManagerService.UpdateManagerdBindAddress:input_type -> apiary.rpc.v1.UpdateManagerdBindAddressRequest
-	118, // 210: apiary.rpc.v1.ManagerService.ConvertStandaloneToJoiner:input_type -> apiary.rpc.v1.ConvertStandaloneToJoinerRequest
-	123, // 211: apiary.rpc.v1.ManagerService.GetFrontendConfig:input_type -> apiary.rpc.v1.GetFrontendConfigRequest
-	125, // 212: apiary.rpc.v1.ManagerService.UpdateFrontendConfig:input_type -> apiary.rpc.v1.UpdateFrontendConfigRequest
-	127, // 213: apiary.rpc.v1.ManagerService.GetRestshimdConfig:input_type -> apiary.rpc.v1.GetRestshimdConfigRequest
-	129, // 214: apiary.rpc.v1.ManagerService.UpdateRestshimdConfig:input_type -> apiary.rpc.v1.UpdateRestshimdConfigRequest
-	131, // 215: apiary.rpc.v1.ManagerService.GetRaftdConfig:input_type -> apiary.rpc.v1.GetRaftdConfigRequest
-	133, // 216: apiary.rpc.v1.ManagerService.SetDatasetQuota:input_type -> apiary.rpc.v1.SetDatasetQuotaRequest
-	135, // 217: apiary.rpc.v1.ManagerService.CreateVMSnapshot:input_type -> apiary.rpc.v1.CreateVMSnapshotRequest
-	137, // 218: apiary.rpc.v1.ManagerService.ListVMSnapshots:input_type -> apiary.rpc.v1.ListVMSnapshotsRequest
-	139, // 219: apiary.rpc.v1.ManagerService.RestoreVMSnapshot:input_type -> apiary.rpc.v1.RestoreVMSnapshotRequest
-	141, // 220: apiary.rpc.v1.ManagerService.DeleteVMSnapshot:input_type -> apiary.rpc.v1.DeleteVMSnapshotRequest
-	144, // 221: apiary.rpc.v1.ManagerService.ListNodeServices:input_type -> apiary.rpc.v1.ListNodeServicesRequest
-	146, // 222: apiary.rpc.v1.ManagerService.RestartNodeService:input_type -> apiary.rpc.v1.RestartNodeServiceRequest
-	152, // 223: apiary.rpc.v1.ManagerService.PreflightRestartNodeService:input_type -> apiary.rpc.v1.PreflightRestartNodeServiceRequest
-	154, // 224: apiary.rpc.v1.ManagerService.ReserveRestartLease:input_type -> apiary.rpc.v1.ReserveRestartLeaseRequest
-	156, // 225: apiary.rpc.v1.ManagerService.ConfirmRestartCompleted:input_type -> apiary.rpc.v1.ConfirmRestartCompletedRequest
-	158, // 226: apiary.rpc.v1.ManagerService.StepAsideForRestart:input_type -> apiary.rpc.v1.StepAsideForRestartRequest
-	160, // 227: apiary.rpc.v1.ManagerService.MutateColonyUpdate:input_type -> apiary.rpc.v1.MutateColonyUpdateRequest
-	306, // 228: apiary.rpc.v1.ManagerService.ExecuteNodeRestartPlan:input_type -> apiary.rpc.v1.ExecuteNodeRestartPlanRequest
-	315, // 229: apiary.rpc.v1.ManagerService.RequestManagerdRestart:input_type -> apiary.rpc.v1.RequestManagerdRestartRequest
-	317, // 230: apiary.rpc.v1.ManagerService.IssueManagerdRestart:input_type -> apiary.rpc.v1.IssueManagerdRestartRequest
-	170, // 231: apiary.rpc.v1.ManagerService.CreateNetwork:input_type -> apiary.rpc.v1.CreateNetworkRequest
-	172, // 232: apiary.rpc.v1.ManagerService.ListNetworks:input_type -> apiary.rpc.v1.ListNetworksRequest
-	174, // 233: apiary.rpc.v1.ManagerService.DeleteNetwork:input_type -> apiary.rpc.v1.DeleteNetworkRequest
-	176, // 234: apiary.rpc.v1.ManagerService.SetNetworkName:input_type -> apiary.rpc.v1.SetNetworkNameRequest
-	214, // 235: apiary.rpc.v1.ManagerService.CreateAPIKey:input_type -> apiary.rpc.v1.CreateAPIKeyRequest
-	216, // 236: apiary.rpc.v1.ManagerService.ListAPIKeys:input_type -> apiary.rpc.v1.ListAPIKeysRequest
-	218, // 237: apiary.rpc.v1.ManagerService.RevokeAPIKey:input_type -> apiary.rpc.v1.RevokeAPIKeyRequest
-	178, // 238: apiary.rpc.v1.ManagerService.CreateJail:input_type -> apiary.rpc.v1.CreateJailRequest
-	187, // 239: apiary.rpc.v1.ManagerService.UpdateJail:input_type -> apiary.rpc.v1.UpdateJailRequest
-	189, // 240: apiary.rpc.v1.ManagerService.DeleteJail:input_type -> apiary.rpc.v1.DeleteJailRequest
-	191, // 241: apiary.rpc.v1.ManagerService.SetJailDesiredState:input_type -> apiary.rpc.v1.SetJailDesiredStateRequest
-	193, // 242: apiary.rpc.v1.ManagerService.SetJailHostname:input_type -> apiary.rpc.v1.SetJailHostnameRequest
-	195, // 243: apiary.rpc.v1.ManagerService.GetJail:input_type -> apiary.rpc.v1.GetJailRequest
-	197, // 244: apiary.rpc.v1.ManagerService.ListJails:input_type -> apiary.rpc.v1.ListJailsRequest
-	199, // 245: apiary.rpc.v1.ManagerService.ListJailsLocal:input_type -> apiary.rpc.v1.ListJailsLocalRequest
-	185, // 246: apiary.rpc.v1.ManagerService.CreateCell:input_type -> apiary.rpc.v1.CreateCellRequest
-	182, // 247: apiary.rpc.v1.ManagerService.RecommendCellType:input_type -> apiary.rpc.v1.RecommendCellTypeRequest
-	201, // 248: apiary.rpc.v1.ManagerService.ForcePurgeJail:input_type -> apiary.rpc.v1.ForcePurgeJailRequest
-	220, // 249: apiary.rpc.v1.ManagerService.SimulateNodeFailure:input_type -> apiary.rpc.v1.SimulateNodeFailureRequest
-	227, // 250: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:input_type -> apiary.rpc.v1.SimulateNetworkFailureRequest
-	229, // 251: apiary.rpc.v1.ManagerService.TraceCellPath:input_type -> apiary.rpc.v1.TraceCellPathRequest
-	203, // 252: apiary.rpc.v1.ManagerService.MigrateJail:input_type -> apiary.rpc.v1.MigrateJailRequest
-	205, // 253: apiary.rpc.v1.ManagerService.ReportVMPhase:input_type -> apiary.rpc.v1.ReportVMPhaseRequest
-	207, // 254: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:input_type -> apiary.rpc.v1.ReportVMTeardownCompleteRequest
-	209, // 255: apiary.rpc.v1.ManagerService.ReportJailPhase:input_type -> apiary.rpc.v1.ReportJailPhaseRequest
-	211, // 256: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:input_type -> apiary.rpc.v1.ReportJailTeardownCompleteRequest
-	88,  // 257: apiary.rpc.v1.ManagerService.PushISOTo:input_type -> apiary.rpc.v1.PushISOToRequest
-	90,  // 258: apiary.rpc.v1.ManagerService.ListJailTemplateNames:input_type -> apiary.rpc.v1.ListJailTemplateNamesRequest
-	92,  // 259: apiary.rpc.v1.ManagerService.PushJailTemplateTo:input_type -> apiary.rpc.v1.PushJailTemplateToRequest
-	95,  // 260: apiary.rpc.v1.ManagerService.ReceiveJailTemplate:input_type -> apiary.rpc.v1.ReceiveJailTemplateRequest
-	310, // 261: apiary.rpc.v1.ManagerService.PushVMSnapshotTo:input_type -> apiary.rpc.v1.PushVMSnapshotToRequest
-	313, // 262: apiary.rpc.v1.ManagerService.ReceiveVMSnapshot:input_type -> apiary.rpc.v1.ReceiveVMSnapshotRequest
-	234, // 263: apiary.rpc.v1.ManagerService.GetLocalNetworkBridgeStatus:input_type -> apiary.rpc.v1.GetLocalNetworkBridgeStatusRequest
-	239, // 264: apiary.rpc.v1.ManagerService.ListAssumptionResults:input_type -> apiary.rpc.v1.ListAssumptionResultsRequest
-	241, // 265: apiary.rpc.v1.ManagerService.PurgeStaleAssumptionResults:input_type -> apiary.rpc.v1.PurgeStaleAssumptionResultsRequest
-	243, // 266: apiary.rpc.v1.ManagerService.ListOrphanedHASTResources:input_type -> apiary.rpc.v1.ListOrphanedHASTResourcesRequest
-	246, // 267: apiary.rpc.v1.ManagerService.CleanupOrphanedHASTResource:input_type -> apiary.rpc.v1.CleanupOrphanedHASTResourceRequest
-	248, // 268: apiary.rpc.v1.ManagerService.GetNetworkTeardownStatus:input_type -> apiary.rpc.v1.GetNetworkTeardownStatusRequest
-	251, // 269: apiary.rpc.v1.ManagerService.RequestJoinColony:input_type -> apiary.rpc.v1.RequestJoinColonyRequest
-	253, // 270: apiary.rpc.v1.ManagerService.GetJoinRequestStatus:input_type -> apiary.rpc.v1.GetJoinRequestStatusRequest
-	255, // 271: apiary.rpc.v1.ManagerService.GetMemberRestartGuardrailCredential:input_type -> apiary.rpc.v1.GetMemberRestartGuardrailCredentialRequest
-	257, // 272: apiary.rpc.v1.ManagerService.ListJoinRequests:input_type -> apiary.rpc.v1.ListJoinRequestsRequest
-	259, // 273: apiary.rpc.v1.ManagerService.ApproveJoinRequest:input_type -> apiary.rpc.v1.ApproveJoinRequestRequest
-	283, // 274: apiary.rpc.v1.ManagerService.RejectJoinRequest:input_type -> apiary.rpc.v1.RejectJoinRequestRequest
-	261, // 275: apiary.rpc.v1.ManagerService.VerifyJoinIntroduction:input_type -> apiary.rpc.v1.VerifyJoinIntroductionRequest
-	263, // 276: apiary.rpc.v1.ManagerService.ReissueJoinSecondPin:input_type -> apiary.rpc.v1.ReissueJoinSecondPinRequest
-	266, // 277: apiary.rpc.v1.ManagerService.PinPeerCertificate:input_type -> apiary.rpc.v1.PinPeerCertificateRequest
-	268, // 278: apiary.rpc.v1.ManagerService.UnpinPeerCertificate:input_type -> apiary.rpc.v1.UnpinPeerCertificateRequest
-	150, // 279: apiary.rpc.v1.ManagerService.PreflightApproveJoinRequest:input_type -> apiary.rpc.v1.PreflightApproveJoinRequestRequest
-	285, // 280: apiary.rpc.v1.ManagerService.CancelJoinRequest:input_type -> apiary.rpc.v1.CancelJoinRequestRequest
-	287, // 281: apiary.rpc.v1.ManagerService.PurgeJoinRequest:input_type -> apiary.rpc.v1.PurgeJoinRequestRequest
-	272, // 282: apiary.rpc.v1.ManagerService.OpenColonyJoinWindow:input_type -> apiary.rpc.v1.OpenColonyJoinWindowRequest
-	274, // 283: apiary.rpc.v1.ManagerService.CloseColonyJoinWindow:input_type -> apiary.rpc.v1.CloseColonyJoinWindowRequest
-	277, // 284: apiary.rpc.v1.ManagerService.SetColonyDiskSize:input_type -> apiary.rpc.v1.SetColonyDiskSizeRequest
-	279, // 285: apiary.rpc.v1.ManagerService.GetColonyDiskSize:input_type -> apiary.rpc.v1.GetColonyDiskSizeRequest
-	281, // 286: apiary.rpc.v1.ManagerService.GetColonyJoinWindow:input_type -> apiary.rpc.v1.GetColonyJoinWindowRequest
-	289, // 287: apiary.rpc.v1.ManagerService.UpdateVoterAddress:input_type -> apiary.rpc.v1.UpdateVoterAddressRequest
-	300, // 288: apiary.rpc.v1.ManagerService.HostPackages:input_type -> apiary.rpc.v1.HostPackagesRequest
-	52,  // 289: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	54,  // 290: apiary.rpc.v1.ManagerService.AuthenticatePassword:output_type -> apiary.rpc.v1.AuthenticatePasswordResponse
-	57,  // 291: apiary.rpc.v1.ManagerService.GetLocalNodeHealth:output_type -> apiary.rpc.v1.GetLocalNodeHealthResponse
-	60,  // 292: apiary.rpc.v1.ManagerService.ListAssumptionClaims:output_type -> apiary.rpc.v1.ListAssumptionClaimsResponse
-	62,  // 293: apiary.rpc.v1.ManagerService.SaveAssumptionClaim:output_type -> apiary.rpc.v1.SaveAssumptionClaimResponse
-	64,  // 294: apiary.rpc.v1.ManagerService.DeleteAssumptionClaim:output_type -> apiary.rpc.v1.DeleteAssumptionClaimResponse
-	67,  // 295: apiary.rpc.v1.ManagerService.ListOriginCertificates:output_type -> apiary.rpc.v1.ListOriginCertificatesResponse
-	69,  // 296: apiary.rpc.v1.ManagerService.IssueOriginCertificate:output_type -> apiary.rpc.v1.IssueOriginCertificateResponse
-	72,  // 297: apiary.rpc.v1.ManagerService.ListLetsEncryptCertificates:output_type -> apiary.rpc.v1.ListLetsEncryptCertificatesResponse
-	74,  // 298: apiary.rpc.v1.ManagerService.IssueLetsEncryptCertificate:output_type -> apiary.rpc.v1.IssueLetsEncryptCertificateResponse
-	24,  // 299: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	26,  // 300: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	30,  // 301: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	28,  // 302: apiary.rpc.v1.ManagerService.RenameVMIdentity:output_type -> apiary.rpc.v1.RenameVMIdentityResponse
-	32,  // 303: apiary.rpc.v1.ManagerService.ForcePurgeVM:output_type -> apiary.rpc.v1.ForcePurgeVMResponse
-	34,  // 304: apiary.rpc.v1.ManagerService.MigrateVM:output_type -> apiary.rpc.v1.MigrateVMResponse
-	36,  // 305: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:output_type -> apiary.rpc.v1.SetVMFirewallPausedResponse
-	38,  // 306: apiary.rpc.v1.ManagerService.SetVMCloudflareExposure:output_type -> apiary.rpc.v1.SetVMCloudflareExposureResponse
-	40,  // 307: apiary.rpc.v1.ManagerService.SetVMDesiredState:output_type -> apiary.rpc.v1.SetVMDesiredStateResponse
-	42,  // 308: apiary.rpc.v1.ManagerService.SetVMFirewallRules:output_type -> apiary.rpc.v1.SetVMFirewallRulesResponse
-	44,  // 309: apiary.rpc.v1.ManagerService.SetVMConfig:output_type -> apiary.rpc.v1.SetVMConfigResponse
-	46,  // 310: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	48,  // 311: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	50,  // 312: apiary.rpc.v1.ManagerService.ListVMsLocal:output_type -> apiary.rpc.v1.ListVMsLocalResponse
-	78,  // 313: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
-	81,  // 314: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
-	83,  // 315: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
-	85,  // 316: apiary.rpc.v1.ManagerService.UpdateISOComment:output_type -> apiary.rpc.v1.UpdateISOCommentResponse
-	87,  // 317: apiary.rpc.v1.ManagerService.SetISODefaultSizeMB:output_type -> apiary.rpc.v1.SetISODefaultSizeMBResponse
-	104, // 318: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
-	106, // 319: apiary.rpc.v1.ManagerService.GetLocalHASTResourceStatus:output_type -> apiary.rpc.v1.GetLocalHASTResourceStatusResponse
-	299, // 320: apiary.rpc.v1.ManagerService.ClusterHealth:output_type -> apiary.rpc.v1.ClusterHealthResponse
-	296, // 321: apiary.rpc.v1.ManagerService.GetMonitoringCluster:output_type -> apiary.rpc.v1.GetMonitoringClusterResponse
-	297, // 322: apiary.rpc.v1.ManagerService.GetMonitoringNodes:output_type -> apiary.rpc.v1.GetMonitoringNodesResponse
-	108, // 323: apiary.rpc.v1.ManagerService.GetVMConsole:output_type -> apiary.rpc.v1.GetVMConsoleResponse
-	110, // 324: apiary.rpc.v1.ManagerService.ProxyVMConsole:output_type -> apiary.rpc.v1.VMConsoleTunnelFrame
-	112, // 325: apiary.rpc.v1.ManagerService.GetVMSerialLog:output_type -> apiary.rpc.v1.GetVMSerialLogResponse
-	114, // 326: apiary.rpc.v1.ManagerService.GetNodeConfig:output_type -> apiary.rpc.v1.GetNodeConfigResponse
-	122, // 327: apiary.rpc.v1.ManagerService.UpdateNodeConfig:output_type -> apiary.rpc.v1.UpdateNodeConfigResponse
-	117, // 328: apiary.rpc.v1.ManagerService.UpdateManagerdBindAddress:output_type -> apiary.rpc.v1.UpdateManagerdBindAddressResponse
-	119, // 329: apiary.rpc.v1.ManagerService.ConvertStandaloneToJoiner:output_type -> apiary.rpc.v1.ConvertStandaloneToJoinerResponse
-	124, // 330: apiary.rpc.v1.ManagerService.GetFrontendConfig:output_type -> apiary.rpc.v1.GetFrontendConfigResponse
-	126, // 331: apiary.rpc.v1.ManagerService.UpdateFrontendConfig:output_type -> apiary.rpc.v1.UpdateFrontendConfigResponse
-	128, // 332: apiary.rpc.v1.ManagerService.GetRestshimdConfig:output_type -> apiary.rpc.v1.GetRestshimdConfigResponse
-	130, // 333: apiary.rpc.v1.ManagerService.UpdateRestshimdConfig:output_type -> apiary.rpc.v1.UpdateRestshimdConfigResponse
-	132, // 334: apiary.rpc.v1.ManagerService.GetRaftdConfig:output_type -> apiary.rpc.v1.GetRaftdConfigResponse
-	134, // 335: apiary.rpc.v1.ManagerService.SetDatasetQuota:output_type -> apiary.rpc.v1.SetDatasetQuotaResponse
-	136, // 336: apiary.rpc.v1.ManagerService.CreateVMSnapshot:output_type -> apiary.rpc.v1.CreateVMSnapshotResponse
-	138, // 337: apiary.rpc.v1.ManagerService.ListVMSnapshots:output_type -> apiary.rpc.v1.ListVMSnapshotsResponse
-	140, // 338: apiary.rpc.v1.ManagerService.RestoreVMSnapshot:output_type -> apiary.rpc.v1.RestoreVMSnapshotResponse
-	142, // 339: apiary.rpc.v1.ManagerService.DeleteVMSnapshot:output_type -> apiary.rpc.v1.DeleteVMSnapshotResponse
-	145, // 340: apiary.rpc.v1.ManagerService.ListNodeServices:output_type -> apiary.rpc.v1.ListNodeServicesResponse
-	147, // 341: apiary.rpc.v1.ManagerService.RestartNodeService:output_type -> apiary.rpc.v1.RestartNodeServiceResponse
-	153, // 342: apiary.rpc.v1.ManagerService.PreflightRestartNodeService:output_type -> apiary.rpc.v1.PreflightRestartNodeServiceResponse
-	155, // 343: apiary.rpc.v1.ManagerService.ReserveRestartLease:output_type -> apiary.rpc.v1.ReserveRestartLeaseResponse
-	157, // 344: apiary.rpc.v1.ManagerService.ConfirmRestartCompleted:output_type -> apiary.rpc.v1.ConfirmRestartCompletedResponse
-	159, // 345: apiary.rpc.v1.ManagerService.StepAsideForRestart:output_type -> apiary.rpc.v1.StepAsideForRestartResponse
-	169, // 346: apiary.rpc.v1.ManagerService.MutateColonyUpdate:output_type -> apiary.rpc.v1.MutateColonyUpdateResponse
-	307, // 347: apiary.rpc.v1.ManagerService.ExecuteNodeRestartPlan:output_type -> apiary.rpc.v1.ExecuteNodeRestartPlanResponse
-	316, // 348: apiary.rpc.v1.ManagerService.RequestManagerdRestart:output_type -> apiary.rpc.v1.RequestManagerdRestartResponse
-	318, // 349: apiary.rpc.v1.ManagerService.IssueManagerdRestart:output_type -> apiary.rpc.v1.IssueManagerdRestartResponse
-	171, // 350: apiary.rpc.v1.ManagerService.CreateNetwork:output_type -> apiary.rpc.v1.CreateNetworkResponse
-	173, // 351: apiary.rpc.v1.ManagerService.ListNetworks:output_type -> apiary.rpc.v1.ListNetworksResponse
-	175, // 352: apiary.rpc.v1.ManagerService.DeleteNetwork:output_type -> apiary.rpc.v1.DeleteNetworkResponse
-	177, // 353: apiary.rpc.v1.ManagerService.SetNetworkName:output_type -> apiary.rpc.v1.SetNetworkNameResponse
-	215, // 354: apiary.rpc.v1.ManagerService.CreateAPIKey:output_type -> apiary.rpc.v1.CreateAPIKeyResponse
-	217, // 355: apiary.rpc.v1.ManagerService.ListAPIKeys:output_type -> apiary.rpc.v1.ListAPIKeysResponse
-	219, // 356: apiary.rpc.v1.ManagerService.RevokeAPIKey:output_type -> apiary.rpc.v1.RevokeAPIKeyResponse
-	179, // 357: apiary.rpc.v1.ManagerService.CreateJail:output_type -> apiary.rpc.v1.CreateJailResponse
-	188, // 358: apiary.rpc.v1.ManagerService.UpdateJail:output_type -> apiary.rpc.v1.UpdateJailResponse
-	190, // 359: apiary.rpc.v1.ManagerService.DeleteJail:output_type -> apiary.rpc.v1.DeleteJailResponse
-	192, // 360: apiary.rpc.v1.ManagerService.SetJailDesiredState:output_type -> apiary.rpc.v1.SetJailDesiredStateResponse
-	194, // 361: apiary.rpc.v1.ManagerService.SetJailHostname:output_type -> apiary.rpc.v1.SetJailHostnameResponse
-	196, // 362: apiary.rpc.v1.ManagerService.GetJail:output_type -> apiary.rpc.v1.GetJailResponse
-	198, // 363: apiary.rpc.v1.ManagerService.ListJails:output_type -> apiary.rpc.v1.ListJailsResponse
-	200, // 364: apiary.rpc.v1.ManagerService.ListJailsLocal:output_type -> apiary.rpc.v1.ListJailsLocalResponse
-	186, // 365: apiary.rpc.v1.ManagerService.CreateCell:output_type -> apiary.rpc.v1.CreateCellResponse
-	184, // 366: apiary.rpc.v1.ManagerService.RecommendCellType:output_type -> apiary.rpc.v1.RecommendCellTypeResponse
-	202, // 367: apiary.rpc.v1.ManagerService.ForcePurgeJail:output_type -> apiary.rpc.v1.ForcePurgeJailResponse
-	221, // 368: apiary.rpc.v1.ManagerService.SimulateNodeFailure:output_type -> apiary.rpc.v1.SimulateNodeFailureResponse
-	228, // 369: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:output_type -> apiary.rpc.v1.SimulateNetworkFailureResponse
-	231, // 370: apiary.rpc.v1.ManagerService.TraceCellPath:output_type -> apiary.rpc.v1.TraceCellPathResponse
-	204, // 371: apiary.rpc.v1.ManagerService.MigrateJail:output_type -> apiary.rpc.v1.MigrateJailResponse
-	206, // 372: apiary.rpc.v1.ManagerService.ReportVMPhase:output_type -> apiary.rpc.v1.ReportVMPhaseResponse
-	208, // 373: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:output_type -> apiary.rpc.v1.ReportVMTeardownCompleteResponse
-	210, // 374: apiary.rpc.v1.ManagerService.ReportJailPhase:output_type -> apiary.rpc.v1.ReportJailPhaseResponse
-	212, // 375: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:output_type -> apiary.rpc.v1.ReportJailTeardownCompleteResponse
-	89,  // 376: apiary.rpc.v1.ManagerService.PushISOTo:output_type -> apiary.rpc.v1.PushISOToResponse
-	91,  // 377: apiary.rpc.v1.ManagerService.ListJailTemplateNames:output_type -> apiary.rpc.v1.ListJailTemplateNamesResponse
-	93,  // 378: apiary.rpc.v1.ManagerService.PushJailTemplateTo:output_type -> apiary.rpc.v1.PushJailTemplateToResponse
-	96,  // 379: apiary.rpc.v1.ManagerService.ReceiveJailTemplate:output_type -> apiary.rpc.v1.ReceiveJailTemplateResponse
-	311, // 380: apiary.rpc.v1.ManagerService.PushVMSnapshotTo:output_type -> apiary.rpc.v1.PushVMSnapshotToResponse
-	314, // 381: apiary.rpc.v1.ManagerService.ReceiveVMSnapshot:output_type -> apiary.rpc.v1.ReceiveVMSnapshotResponse
-	235, // 382: apiary.rpc.v1.ManagerService.GetLocalNetworkBridgeStatus:output_type -> apiary.rpc.v1.GetLocalNetworkBridgeStatusResponse
-	240, // 383: apiary.rpc.v1.ManagerService.ListAssumptionResults:output_type -> apiary.rpc.v1.ListAssumptionResultsResponse
-	242, // 384: apiary.rpc.v1.ManagerService.PurgeStaleAssumptionResults:output_type -> apiary.rpc.v1.PurgeStaleAssumptionResultsResponse
-	245, // 385: apiary.rpc.v1.ManagerService.ListOrphanedHASTResources:output_type -> apiary.rpc.v1.ListOrphanedHASTResourcesResponse
-	247, // 386: apiary.rpc.v1.ManagerService.CleanupOrphanedHASTResource:output_type -> apiary.rpc.v1.CleanupOrphanedHASTResourceResponse
-	249, // 387: apiary.rpc.v1.ManagerService.GetNetworkTeardownStatus:output_type -> apiary.rpc.v1.GetNetworkTeardownStatusResponse
-	252, // 388: apiary.rpc.v1.ManagerService.RequestJoinColony:output_type -> apiary.rpc.v1.RequestJoinColonyResponse
-	254, // 389: apiary.rpc.v1.ManagerService.GetJoinRequestStatus:output_type -> apiary.rpc.v1.GetJoinRequestStatusResponse
-	256, // 390: apiary.rpc.v1.ManagerService.GetMemberRestartGuardrailCredential:output_type -> apiary.rpc.v1.GetMemberRestartGuardrailCredentialResponse
-	258, // 391: apiary.rpc.v1.ManagerService.ListJoinRequests:output_type -> apiary.rpc.v1.ListJoinRequestsResponse
-	260, // 392: apiary.rpc.v1.ManagerService.ApproveJoinRequest:output_type -> apiary.rpc.v1.ApproveJoinRequestResponse
-	284, // 393: apiary.rpc.v1.ManagerService.RejectJoinRequest:output_type -> apiary.rpc.v1.RejectJoinRequestResponse
-	262, // 394: apiary.rpc.v1.ManagerService.VerifyJoinIntroduction:output_type -> apiary.rpc.v1.VerifyJoinIntroductionResponse
-	264, // 395: apiary.rpc.v1.ManagerService.ReissueJoinSecondPin:output_type -> apiary.rpc.v1.ReissueJoinSecondPinResponse
-	267, // 396: apiary.rpc.v1.ManagerService.PinPeerCertificate:output_type -> apiary.rpc.v1.PinPeerCertificateResponse
-	269, // 397: apiary.rpc.v1.ManagerService.UnpinPeerCertificate:output_type -> apiary.rpc.v1.UnpinPeerCertificateResponse
-	151, // 398: apiary.rpc.v1.ManagerService.PreflightApproveJoinRequest:output_type -> apiary.rpc.v1.PreflightApproveJoinRequestResponse
-	286, // 399: apiary.rpc.v1.ManagerService.CancelJoinRequest:output_type -> apiary.rpc.v1.CancelJoinRequestResponse
-	288, // 400: apiary.rpc.v1.ManagerService.PurgeJoinRequest:output_type -> apiary.rpc.v1.PurgeJoinRequestResponse
-	273, // 401: apiary.rpc.v1.ManagerService.OpenColonyJoinWindow:output_type -> apiary.rpc.v1.OpenColonyJoinWindowResponse
-	275, // 402: apiary.rpc.v1.ManagerService.CloseColonyJoinWindow:output_type -> apiary.rpc.v1.CloseColonyJoinWindowResponse
-	278, // 403: apiary.rpc.v1.ManagerService.SetColonyDiskSize:output_type -> apiary.rpc.v1.SetColonyDiskSizeResponse
-	280, // 404: apiary.rpc.v1.ManagerService.GetColonyDiskSize:output_type -> apiary.rpc.v1.GetColonyDiskSizeResponse
-	282, // 405: apiary.rpc.v1.ManagerService.GetColonyJoinWindow:output_type -> apiary.rpc.v1.GetColonyJoinWindowResponse
-	290, // 406: apiary.rpc.v1.ManagerService.UpdateVoterAddress:output_type -> apiary.rpc.v1.UpdateVoterAddressResponse
-	305, // 407: apiary.rpc.v1.ManagerService.HostPackages:output_type -> apiary.rpc.v1.HostPackagesResponse
-	289, // [289:408] is the sub-list for method output_type
-	170, // [170:289] is the sub-list for method input_type
-	170, // [170:170] is the sub-list for extension type_name
-	170, // [170:170] is the sub-list for extension extendee
-	0,   // [0:170] is the sub-list for field type_name
+	265, // 135: apiary.rpc.v1.TrustedPeer.next:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 136: apiary.rpc.v1.PinPeerCertificateRequest.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 137: apiary.rpc.v1.PinPeerCertificateResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 138: apiary.rpc.v1.TransitionPeerCertificateRequest.next:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 139: apiary.rpc.v1.TransitionPeerCertificateResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 140: apiary.rpc.v1.ActivatePeerCertificateTransitionResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 141: apiary.rpc.v1.AbandonPeerCertificateTransitionResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	265, // 142: apiary.rpc.v1.UnpinPeerCertificateResponse.peer:type_name -> apiary.rpc.v1.TrustedPeer
+	277, // 143: apiary.rpc.v1.OpenColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
+	277, // 144: apiary.rpc.v1.CloseColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
+	282, // 145: apiary.rpc.v1.SetColonyDiskSizeResponse.colony_disk_size:type_name -> apiary.rpc.v1.ColonyDiskSize
+	282, // 146: apiary.rpc.v1.GetColonyDiskSizeResponse.colony_disk_size:type_name -> apiary.rpc.v1.ColonyDiskSize
+	277, // 147: apiary.rpc.v1.GetColonyJoinWindowResponse.window:type_name -> apiary.rpc.v1.ColonyJoinWindow
+	325, // 148: apiary.rpc.v1.GetColonyJoinWindowResponse.managerd_fingerprints:type_name -> apiary.rpc.v1.GetColonyJoinWindowResponse.ManagerdFingerprintsEntry
+	250, // 149: apiary.rpc.v1.RejectJoinRequestResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
+	250, // 150: apiary.rpc.v1.CancelJoinRequestResponse.request:type_name -> apiary.rpc.v1.PendingJoinRequest
+	300, // 151: apiary.rpc.v1.MonitoringNodeReport.health:type_name -> apiary.rpc.v1.MonitoringHealthStatus
+	98,  // 152: apiary.rpc.v1.MonitoringNodeReport.cpu:type_name -> apiary.rpc.v1.CPUStats
+	99,  // 153: apiary.rpc.v1.MonitoringNodeReport.mem:type_name -> apiary.rpc.v1.MemStats
+	100, // 154: apiary.rpc.v1.MonitoringNodeReport.pools:type_name -> apiary.rpc.v1.PoolStats
+	101, // 155: apiary.rpc.v1.MonitoringNodeReport.disks:type_name -> apiary.rpc.v1.DiskStats
+	102, // 156: apiary.rpc.v1.MonitoringNodeReport.net:type_name -> apiary.rpc.v1.NetIfaceStats
+	300, // 157: apiary.rpc.v1.GetMonitoringClusterResponse.health:type_name -> apiary.rpc.v1.MonitoringHealthStatus
+	301, // 158: apiary.rpc.v1.GetMonitoringClusterResponse.nodes:type_name -> apiary.rpc.v1.MonitoringNodeReport
+	301, // 159: apiary.rpc.v1.GetMonitoringNodesResponse.nodes:type_name -> apiary.rpc.v1.MonitoringNodeReport
+	56,  // 160: apiary.rpc.v1.ClusterNodeHealth.observations:type_name -> apiary.rpc.v1.HealthObservation
+	304, // 161: apiary.rpc.v1.ClusterHealthResponse.nodes:type_name -> apiary.rpc.v1.ClusterNodeHealth
+	17,  // 162: apiary.rpc.v1.HostBaseSystem.update_status:type_name -> apiary.rpc.v1.HostPackageUpdateStatus
+	18,  // 163: apiary.rpc.v1.HostPackageCatalogue.state:type_name -> apiary.rpc.v1.HostPackageCatalogueState
+	17,  // 164: apiary.rpc.v1.HostInstalledPackage.update_status:type_name -> apiary.rpc.v1.HostPackageUpdateStatus
+	307, // 165: apiary.rpc.v1.HostPackagesResponse.base:type_name -> apiary.rpc.v1.HostBaseSystem
+	308, // 166: apiary.rpc.v1.HostPackagesResponse.catalogue:type_name -> apiary.rpc.v1.HostPackageCatalogue
+	309, // 167: apiary.rpc.v1.HostPackagesResponse.ports:type_name -> apiary.rpc.v1.HostInstalledPackage
+	310, // 168: apiary.rpc.v1.HostPackagesResponse.unknown:type_name -> apiary.rpc.v1.HostPackageUnknown
+	314, // 169: apiary.rpc.v1.ExecuteNodeRestartPlanResponse.result:type_name -> apiary.rpc.v1.NodeRestartPlanResult
+	315, // 170: apiary.rpc.v1.NodeRestartPlanResult.step_aside:type_name -> apiary.rpc.v1.NodeRestartPlanStepAside
+	318, // 171: apiary.rpc.v1.ReceiveVMSnapshotRequest.metadata:type_name -> apiary.rpc.v1.VMSnapshotMetadata
+	166, // 172: apiary.rpc.v1.RequestManagerdRestartRequest.fence:type_name -> apiary.rpc.v1.ColonyUpdateFence
+	324, // 173: apiary.rpc.v1.RequestManagerdRestartResponse.issued:type_name -> apiary.rpc.v1.IssueManagerdRestartResponse
+	166, // 174: apiary.rpc.v1.IssueManagerdRestartRequest.fence:type_name -> apiary.rpc.v1.ColonyUpdateFence
+	51,  // 175: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	53,  // 176: apiary.rpc.v1.ManagerService.AuthenticatePassword:input_type -> apiary.rpc.v1.AuthenticatePasswordRequest
+	55,  // 177: apiary.rpc.v1.ManagerService.GetLocalNodeHealth:input_type -> apiary.rpc.v1.GetLocalNodeHealthRequest
+	59,  // 178: apiary.rpc.v1.ManagerService.ListAssumptionClaims:input_type -> apiary.rpc.v1.ListAssumptionClaimsRequest
+	61,  // 179: apiary.rpc.v1.ManagerService.SaveAssumptionClaim:input_type -> apiary.rpc.v1.SaveAssumptionClaimRequest
+	63,  // 180: apiary.rpc.v1.ManagerService.DeleteAssumptionClaim:input_type -> apiary.rpc.v1.DeleteAssumptionClaimRequest
+	66,  // 181: apiary.rpc.v1.ManagerService.ListOriginCertificates:input_type -> apiary.rpc.v1.ListOriginCertificatesRequest
+	68,  // 182: apiary.rpc.v1.ManagerService.IssueOriginCertificate:input_type -> apiary.rpc.v1.IssueOriginCertificateRequest
+	71,  // 183: apiary.rpc.v1.ManagerService.ListLetsEncryptCertificates:input_type -> apiary.rpc.v1.ListLetsEncryptCertificatesRequest
+	73,  // 184: apiary.rpc.v1.ManagerService.IssueLetsEncryptCertificate:input_type -> apiary.rpc.v1.IssueLetsEncryptCertificateRequest
+	23,  // 185: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	25,  // 186: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	29,  // 187: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	27,  // 188: apiary.rpc.v1.ManagerService.RenameVMIdentity:input_type -> apiary.rpc.v1.RenameVMIdentityRequest
+	31,  // 189: apiary.rpc.v1.ManagerService.ForcePurgeVM:input_type -> apiary.rpc.v1.ForcePurgeVMRequest
+	33,  // 190: apiary.rpc.v1.ManagerService.MigrateVM:input_type -> apiary.rpc.v1.MigrateVMRequest
+	35,  // 191: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:input_type -> apiary.rpc.v1.SetVMFirewallPausedRequest
+	37,  // 192: apiary.rpc.v1.ManagerService.SetVMCloudflareExposure:input_type -> apiary.rpc.v1.SetVMCloudflareExposureRequest
+	39,  // 193: apiary.rpc.v1.ManagerService.SetVMDesiredState:input_type -> apiary.rpc.v1.SetVMDesiredStateRequest
+	41,  // 194: apiary.rpc.v1.ManagerService.SetVMFirewallRules:input_type -> apiary.rpc.v1.SetVMFirewallRulesRequest
+	43,  // 195: apiary.rpc.v1.ManagerService.SetVMConfig:input_type -> apiary.rpc.v1.SetVMConfigRequest
+	45,  // 196: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	47,  // 197: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	49,  // 198: apiary.rpc.v1.ManagerService.ListVMsLocal:input_type -> apiary.rpc.v1.ListVMsLocalRequest
+	76,  // 199: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
+	79,  // 200: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
+	82,  // 201: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
+	84,  // 202: apiary.rpc.v1.ManagerService.UpdateISOComment:input_type -> apiary.rpc.v1.UpdateISOCommentRequest
+	86,  // 203: apiary.rpc.v1.ManagerService.SetISODefaultSizeMB:input_type -> apiary.rpc.v1.SetISODefaultSizeMBRequest
+	97,  // 204: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
+	105, // 205: apiary.rpc.v1.ManagerService.GetLocalHASTResourceStatus:input_type -> apiary.rpc.v1.GetLocalHASTResourceStatusRequest
+	297, // 206: apiary.rpc.v1.ManagerService.ClusterHealth:input_type -> apiary.rpc.v1.ClusterHealthRequest
+	298, // 207: apiary.rpc.v1.ManagerService.GetMonitoringCluster:input_type -> apiary.rpc.v1.GetMonitoringClusterRequest
+	299, // 208: apiary.rpc.v1.ManagerService.GetMonitoringNodes:input_type -> apiary.rpc.v1.GetMonitoringNodesRequest
+	107, // 209: apiary.rpc.v1.ManagerService.GetVMConsole:input_type -> apiary.rpc.v1.GetVMConsoleRequest
+	110, // 210: apiary.rpc.v1.ManagerService.ProxyVMConsole:input_type -> apiary.rpc.v1.VMConsoleTunnelFrame
+	111, // 211: apiary.rpc.v1.ManagerService.GetVMSerialLog:input_type -> apiary.rpc.v1.GetVMSerialLogRequest
+	113, // 212: apiary.rpc.v1.ManagerService.GetNodeConfig:input_type -> apiary.rpc.v1.GetNodeConfigRequest
+	121, // 213: apiary.rpc.v1.ManagerService.UpdateNodeConfig:input_type -> apiary.rpc.v1.UpdateNodeConfigRequest
+	116, // 214: apiary.rpc.v1.ManagerService.UpdateManagerdBindAddress:input_type -> apiary.rpc.v1.UpdateManagerdBindAddressRequest
+	118, // 215: apiary.rpc.v1.ManagerService.ConvertStandaloneToJoiner:input_type -> apiary.rpc.v1.ConvertStandaloneToJoinerRequest
+	123, // 216: apiary.rpc.v1.ManagerService.GetFrontendConfig:input_type -> apiary.rpc.v1.GetFrontendConfigRequest
+	125, // 217: apiary.rpc.v1.ManagerService.UpdateFrontendConfig:input_type -> apiary.rpc.v1.UpdateFrontendConfigRequest
+	127, // 218: apiary.rpc.v1.ManagerService.GetRestshimdConfig:input_type -> apiary.rpc.v1.GetRestshimdConfigRequest
+	129, // 219: apiary.rpc.v1.ManagerService.UpdateRestshimdConfig:input_type -> apiary.rpc.v1.UpdateRestshimdConfigRequest
+	131, // 220: apiary.rpc.v1.ManagerService.GetRaftdConfig:input_type -> apiary.rpc.v1.GetRaftdConfigRequest
+	133, // 221: apiary.rpc.v1.ManagerService.SetDatasetQuota:input_type -> apiary.rpc.v1.SetDatasetQuotaRequest
+	135, // 222: apiary.rpc.v1.ManagerService.CreateVMSnapshot:input_type -> apiary.rpc.v1.CreateVMSnapshotRequest
+	137, // 223: apiary.rpc.v1.ManagerService.ListVMSnapshots:input_type -> apiary.rpc.v1.ListVMSnapshotsRequest
+	139, // 224: apiary.rpc.v1.ManagerService.RestoreVMSnapshot:input_type -> apiary.rpc.v1.RestoreVMSnapshotRequest
+	141, // 225: apiary.rpc.v1.ManagerService.DeleteVMSnapshot:input_type -> apiary.rpc.v1.DeleteVMSnapshotRequest
+	144, // 226: apiary.rpc.v1.ManagerService.ListNodeServices:input_type -> apiary.rpc.v1.ListNodeServicesRequest
+	146, // 227: apiary.rpc.v1.ManagerService.RestartNodeService:input_type -> apiary.rpc.v1.RestartNodeServiceRequest
+	152, // 228: apiary.rpc.v1.ManagerService.PreflightRestartNodeService:input_type -> apiary.rpc.v1.PreflightRestartNodeServiceRequest
+	154, // 229: apiary.rpc.v1.ManagerService.ReserveRestartLease:input_type -> apiary.rpc.v1.ReserveRestartLeaseRequest
+	156, // 230: apiary.rpc.v1.ManagerService.ConfirmRestartCompleted:input_type -> apiary.rpc.v1.ConfirmRestartCompletedRequest
+	158, // 231: apiary.rpc.v1.ManagerService.StepAsideForRestart:input_type -> apiary.rpc.v1.StepAsideForRestartRequest
+	160, // 232: apiary.rpc.v1.ManagerService.MutateColonyUpdate:input_type -> apiary.rpc.v1.MutateColonyUpdateRequest
+	312, // 233: apiary.rpc.v1.ManagerService.ExecuteNodeRestartPlan:input_type -> apiary.rpc.v1.ExecuteNodeRestartPlanRequest
+	321, // 234: apiary.rpc.v1.ManagerService.RequestManagerdRestart:input_type -> apiary.rpc.v1.RequestManagerdRestartRequest
+	323, // 235: apiary.rpc.v1.ManagerService.IssueManagerdRestart:input_type -> apiary.rpc.v1.IssueManagerdRestartRequest
+	170, // 236: apiary.rpc.v1.ManagerService.CreateNetwork:input_type -> apiary.rpc.v1.CreateNetworkRequest
+	172, // 237: apiary.rpc.v1.ManagerService.ListNetworks:input_type -> apiary.rpc.v1.ListNetworksRequest
+	174, // 238: apiary.rpc.v1.ManagerService.DeleteNetwork:input_type -> apiary.rpc.v1.DeleteNetworkRequest
+	176, // 239: apiary.rpc.v1.ManagerService.SetNetworkName:input_type -> apiary.rpc.v1.SetNetworkNameRequest
+	214, // 240: apiary.rpc.v1.ManagerService.CreateAPIKey:input_type -> apiary.rpc.v1.CreateAPIKeyRequest
+	216, // 241: apiary.rpc.v1.ManagerService.ListAPIKeys:input_type -> apiary.rpc.v1.ListAPIKeysRequest
+	218, // 242: apiary.rpc.v1.ManagerService.RevokeAPIKey:input_type -> apiary.rpc.v1.RevokeAPIKeyRequest
+	178, // 243: apiary.rpc.v1.ManagerService.CreateJail:input_type -> apiary.rpc.v1.CreateJailRequest
+	187, // 244: apiary.rpc.v1.ManagerService.UpdateJail:input_type -> apiary.rpc.v1.UpdateJailRequest
+	189, // 245: apiary.rpc.v1.ManagerService.DeleteJail:input_type -> apiary.rpc.v1.DeleteJailRequest
+	191, // 246: apiary.rpc.v1.ManagerService.SetJailDesiredState:input_type -> apiary.rpc.v1.SetJailDesiredStateRequest
+	193, // 247: apiary.rpc.v1.ManagerService.SetJailHostname:input_type -> apiary.rpc.v1.SetJailHostnameRequest
+	195, // 248: apiary.rpc.v1.ManagerService.GetJail:input_type -> apiary.rpc.v1.GetJailRequest
+	197, // 249: apiary.rpc.v1.ManagerService.ListJails:input_type -> apiary.rpc.v1.ListJailsRequest
+	199, // 250: apiary.rpc.v1.ManagerService.ListJailsLocal:input_type -> apiary.rpc.v1.ListJailsLocalRequest
+	185, // 251: apiary.rpc.v1.ManagerService.CreateCell:input_type -> apiary.rpc.v1.CreateCellRequest
+	182, // 252: apiary.rpc.v1.ManagerService.RecommendCellType:input_type -> apiary.rpc.v1.RecommendCellTypeRequest
+	201, // 253: apiary.rpc.v1.ManagerService.ForcePurgeJail:input_type -> apiary.rpc.v1.ForcePurgeJailRequest
+	220, // 254: apiary.rpc.v1.ManagerService.SimulateNodeFailure:input_type -> apiary.rpc.v1.SimulateNodeFailureRequest
+	227, // 255: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:input_type -> apiary.rpc.v1.SimulateNetworkFailureRequest
+	229, // 256: apiary.rpc.v1.ManagerService.TraceCellPath:input_type -> apiary.rpc.v1.TraceCellPathRequest
+	203, // 257: apiary.rpc.v1.ManagerService.MigrateJail:input_type -> apiary.rpc.v1.MigrateJailRequest
+	205, // 258: apiary.rpc.v1.ManagerService.ReportVMPhase:input_type -> apiary.rpc.v1.ReportVMPhaseRequest
+	207, // 259: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:input_type -> apiary.rpc.v1.ReportVMTeardownCompleteRequest
+	209, // 260: apiary.rpc.v1.ManagerService.ReportJailPhase:input_type -> apiary.rpc.v1.ReportJailPhaseRequest
+	211, // 261: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:input_type -> apiary.rpc.v1.ReportJailTeardownCompleteRequest
+	88,  // 262: apiary.rpc.v1.ManagerService.PushISOTo:input_type -> apiary.rpc.v1.PushISOToRequest
+	90,  // 263: apiary.rpc.v1.ManagerService.ListJailTemplateNames:input_type -> apiary.rpc.v1.ListJailTemplateNamesRequest
+	92,  // 264: apiary.rpc.v1.ManagerService.PushJailTemplateTo:input_type -> apiary.rpc.v1.PushJailTemplateToRequest
+	95,  // 265: apiary.rpc.v1.ManagerService.ReceiveJailTemplate:input_type -> apiary.rpc.v1.ReceiveJailTemplateRequest
+	316, // 266: apiary.rpc.v1.ManagerService.PushVMSnapshotTo:input_type -> apiary.rpc.v1.PushVMSnapshotToRequest
+	319, // 267: apiary.rpc.v1.ManagerService.ReceiveVMSnapshot:input_type -> apiary.rpc.v1.ReceiveVMSnapshotRequest
+	234, // 268: apiary.rpc.v1.ManagerService.GetLocalNetworkBridgeStatus:input_type -> apiary.rpc.v1.GetLocalNetworkBridgeStatusRequest
+	239, // 269: apiary.rpc.v1.ManagerService.ListAssumptionResults:input_type -> apiary.rpc.v1.ListAssumptionResultsRequest
+	241, // 270: apiary.rpc.v1.ManagerService.PurgeStaleAssumptionResults:input_type -> apiary.rpc.v1.PurgeStaleAssumptionResultsRequest
+	243, // 271: apiary.rpc.v1.ManagerService.ListOrphanedHASTResources:input_type -> apiary.rpc.v1.ListOrphanedHASTResourcesRequest
+	246, // 272: apiary.rpc.v1.ManagerService.CleanupOrphanedHASTResource:input_type -> apiary.rpc.v1.CleanupOrphanedHASTResourceRequest
+	248, // 273: apiary.rpc.v1.ManagerService.GetNetworkTeardownStatus:input_type -> apiary.rpc.v1.GetNetworkTeardownStatusRequest
+	251, // 274: apiary.rpc.v1.ManagerService.RequestJoinColony:input_type -> apiary.rpc.v1.RequestJoinColonyRequest
+	253, // 275: apiary.rpc.v1.ManagerService.GetJoinRequestStatus:input_type -> apiary.rpc.v1.GetJoinRequestStatusRequest
+	255, // 276: apiary.rpc.v1.ManagerService.GetMemberRestartGuardrailCredential:input_type -> apiary.rpc.v1.GetMemberRestartGuardrailCredentialRequest
+	257, // 277: apiary.rpc.v1.ManagerService.ListJoinRequests:input_type -> apiary.rpc.v1.ListJoinRequestsRequest
+	259, // 278: apiary.rpc.v1.ManagerService.ApproveJoinRequest:input_type -> apiary.rpc.v1.ApproveJoinRequestRequest
+	289, // 279: apiary.rpc.v1.ManagerService.RejectJoinRequest:input_type -> apiary.rpc.v1.RejectJoinRequestRequest
+	261, // 280: apiary.rpc.v1.ManagerService.VerifyJoinIntroduction:input_type -> apiary.rpc.v1.VerifyJoinIntroductionRequest
+	263, // 281: apiary.rpc.v1.ManagerService.ReissueJoinSecondPin:input_type -> apiary.rpc.v1.ReissueJoinSecondPinRequest
+	266, // 282: apiary.rpc.v1.ManagerService.PinPeerCertificate:input_type -> apiary.rpc.v1.PinPeerCertificateRequest
+	274, // 283: apiary.rpc.v1.ManagerService.UnpinPeerCertificate:input_type -> apiary.rpc.v1.UnpinPeerCertificateRequest
+	268, // 284: apiary.rpc.v1.ManagerService.TransitionPeerCertificate:input_type -> apiary.rpc.v1.TransitionPeerCertificateRequest
+	270, // 285: apiary.rpc.v1.ManagerService.ActivatePeerCertificateTransition:input_type -> apiary.rpc.v1.ActivatePeerCertificateTransitionRequest
+	272, // 286: apiary.rpc.v1.ManagerService.AbandonPeerCertificateTransition:input_type -> apiary.rpc.v1.AbandonPeerCertificateTransitionRequest
+	150, // 287: apiary.rpc.v1.ManagerService.PreflightApproveJoinRequest:input_type -> apiary.rpc.v1.PreflightApproveJoinRequestRequest
+	291, // 288: apiary.rpc.v1.ManagerService.CancelJoinRequest:input_type -> apiary.rpc.v1.CancelJoinRequestRequest
+	293, // 289: apiary.rpc.v1.ManagerService.PurgeJoinRequest:input_type -> apiary.rpc.v1.PurgeJoinRequestRequest
+	278, // 290: apiary.rpc.v1.ManagerService.OpenColonyJoinWindow:input_type -> apiary.rpc.v1.OpenColonyJoinWindowRequest
+	280, // 291: apiary.rpc.v1.ManagerService.CloseColonyJoinWindow:input_type -> apiary.rpc.v1.CloseColonyJoinWindowRequest
+	283, // 292: apiary.rpc.v1.ManagerService.SetColonyDiskSize:input_type -> apiary.rpc.v1.SetColonyDiskSizeRequest
+	285, // 293: apiary.rpc.v1.ManagerService.GetColonyDiskSize:input_type -> apiary.rpc.v1.GetColonyDiskSizeRequest
+	287, // 294: apiary.rpc.v1.ManagerService.GetColonyJoinWindow:input_type -> apiary.rpc.v1.GetColonyJoinWindowRequest
+	295, // 295: apiary.rpc.v1.ManagerService.UpdateVoterAddress:input_type -> apiary.rpc.v1.UpdateVoterAddressRequest
+	306, // 296: apiary.rpc.v1.ManagerService.HostPackages:input_type -> apiary.rpc.v1.HostPackagesRequest
+	52,  // 297: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	54,  // 298: apiary.rpc.v1.ManagerService.AuthenticatePassword:output_type -> apiary.rpc.v1.AuthenticatePasswordResponse
+	57,  // 299: apiary.rpc.v1.ManagerService.GetLocalNodeHealth:output_type -> apiary.rpc.v1.GetLocalNodeHealthResponse
+	60,  // 300: apiary.rpc.v1.ManagerService.ListAssumptionClaims:output_type -> apiary.rpc.v1.ListAssumptionClaimsResponse
+	62,  // 301: apiary.rpc.v1.ManagerService.SaveAssumptionClaim:output_type -> apiary.rpc.v1.SaveAssumptionClaimResponse
+	64,  // 302: apiary.rpc.v1.ManagerService.DeleteAssumptionClaim:output_type -> apiary.rpc.v1.DeleteAssumptionClaimResponse
+	67,  // 303: apiary.rpc.v1.ManagerService.ListOriginCertificates:output_type -> apiary.rpc.v1.ListOriginCertificatesResponse
+	69,  // 304: apiary.rpc.v1.ManagerService.IssueOriginCertificate:output_type -> apiary.rpc.v1.IssueOriginCertificateResponse
+	72,  // 305: apiary.rpc.v1.ManagerService.ListLetsEncryptCertificates:output_type -> apiary.rpc.v1.ListLetsEncryptCertificatesResponse
+	74,  // 306: apiary.rpc.v1.ManagerService.IssueLetsEncryptCertificate:output_type -> apiary.rpc.v1.IssueLetsEncryptCertificateResponse
+	24,  // 307: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	26,  // 308: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	30,  // 309: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	28,  // 310: apiary.rpc.v1.ManagerService.RenameVMIdentity:output_type -> apiary.rpc.v1.RenameVMIdentityResponse
+	32,  // 311: apiary.rpc.v1.ManagerService.ForcePurgeVM:output_type -> apiary.rpc.v1.ForcePurgeVMResponse
+	34,  // 312: apiary.rpc.v1.ManagerService.MigrateVM:output_type -> apiary.rpc.v1.MigrateVMResponse
+	36,  // 313: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:output_type -> apiary.rpc.v1.SetVMFirewallPausedResponse
+	38,  // 314: apiary.rpc.v1.ManagerService.SetVMCloudflareExposure:output_type -> apiary.rpc.v1.SetVMCloudflareExposureResponse
+	40,  // 315: apiary.rpc.v1.ManagerService.SetVMDesiredState:output_type -> apiary.rpc.v1.SetVMDesiredStateResponse
+	42,  // 316: apiary.rpc.v1.ManagerService.SetVMFirewallRules:output_type -> apiary.rpc.v1.SetVMFirewallRulesResponse
+	44,  // 317: apiary.rpc.v1.ManagerService.SetVMConfig:output_type -> apiary.rpc.v1.SetVMConfigResponse
+	46,  // 318: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	48,  // 319: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	50,  // 320: apiary.rpc.v1.ManagerService.ListVMsLocal:output_type -> apiary.rpc.v1.ListVMsLocalResponse
+	78,  // 321: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
+	81,  // 322: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
+	83,  // 323: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
+	85,  // 324: apiary.rpc.v1.ManagerService.UpdateISOComment:output_type -> apiary.rpc.v1.UpdateISOCommentResponse
+	87,  // 325: apiary.rpc.v1.ManagerService.SetISODefaultSizeMB:output_type -> apiary.rpc.v1.SetISODefaultSizeMBResponse
+	104, // 326: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
+	106, // 327: apiary.rpc.v1.ManagerService.GetLocalHASTResourceStatus:output_type -> apiary.rpc.v1.GetLocalHASTResourceStatusResponse
+	305, // 328: apiary.rpc.v1.ManagerService.ClusterHealth:output_type -> apiary.rpc.v1.ClusterHealthResponse
+	302, // 329: apiary.rpc.v1.ManagerService.GetMonitoringCluster:output_type -> apiary.rpc.v1.GetMonitoringClusterResponse
+	303, // 330: apiary.rpc.v1.ManagerService.GetMonitoringNodes:output_type -> apiary.rpc.v1.GetMonitoringNodesResponse
+	108, // 331: apiary.rpc.v1.ManagerService.GetVMConsole:output_type -> apiary.rpc.v1.GetVMConsoleResponse
+	110, // 332: apiary.rpc.v1.ManagerService.ProxyVMConsole:output_type -> apiary.rpc.v1.VMConsoleTunnelFrame
+	112, // 333: apiary.rpc.v1.ManagerService.GetVMSerialLog:output_type -> apiary.rpc.v1.GetVMSerialLogResponse
+	114, // 334: apiary.rpc.v1.ManagerService.GetNodeConfig:output_type -> apiary.rpc.v1.GetNodeConfigResponse
+	122, // 335: apiary.rpc.v1.ManagerService.UpdateNodeConfig:output_type -> apiary.rpc.v1.UpdateNodeConfigResponse
+	117, // 336: apiary.rpc.v1.ManagerService.UpdateManagerdBindAddress:output_type -> apiary.rpc.v1.UpdateManagerdBindAddressResponse
+	119, // 337: apiary.rpc.v1.ManagerService.ConvertStandaloneToJoiner:output_type -> apiary.rpc.v1.ConvertStandaloneToJoinerResponse
+	124, // 338: apiary.rpc.v1.ManagerService.GetFrontendConfig:output_type -> apiary.rpc.v1.GetFrontendConfigResponse
+	126, // 339: apiary.rpc.v1.ManagerService.UpdateFrontendConfig:output_type -> apiary.rpc.v1.UpdateFrontendConfigResponse
+	128, // 340: apiary.rpc.v1.ManagerService.GetRestshimdConfig:output_type -> apiary.rpc.v1.GetRestshimdConfigResponse
+	130, // 341: apiary.rpc.v1.ManagerService.UpdateRestshimdConfig:output_type -> apiary.rpc.v1.UpdateRestshimdConfigResponse
+	132, // 342: apiary.rpc.v1.ManagerService.GetRaftdConfig:output_type -> apiary.rpc.v1.GetRaftdConfigResponse
+	134, // 343: apiary.rpc.v1.ManagerService.SetDatasetQuota:output_type -> apiary.rpc.v1.SetDatasetQuotaResponse
+	136, // 344: apiary.rpc.v1.ManagerService.CreateVMSnapshot:output_type -> apiary.rpc.v1.CreateVMSnapshotResponse
+	138, // 345: apiary.rpc.v1.ManagerService.ListVMSnapshots:output_type -> apiary.rpc.v1.ListVMSnapshotsResponse
+	140, // 346: apiary.rpc.v1.ManagerService.RestoreVMSnapshot:output_type -> apiary.rpc.v1.RestoreVMSnapshotResponse
+	142, // 347: apiary.rpc.v1.ManagerService.DeleteVMSnapshot:output_type -> apiary.rpc.v1.DeleteVMSnapshotResponse
+	145, // 348: apiary.rpc.v1.ManagerService.ListNodeServices:output_type -> apiary.rpc.v1.ListNodeServicesResponse
+	147, // 349: apiary.rpc.v1.ManagerService.RestartNodeService:output_type -> apiary.rpc.v1.RestartNodeServiceResponse
+	153, // 350: apiary.rpc.v1.ManagerService.PreflightRestartNodeService:output_type -> apiary.rpc.v1.PreflightRestartNodeServiceResponse
+	155, // 351: apiary.rpc.v1.ManagerService.ReserveRestartLease:output_type -> apiary.rpc.v1.ReserveRestartLeaseResponse
+	157, // 352: apiary.rpc.v1.ManagerService.ConfirmRestartCompleted:output_type -> apiary.rpc.v1.ConfirmRestartCompletedResponse
+	159, // 353: apiary.rpc.v1.ManagerService.StepAsideForRestart:output_type -> apiary.rpc.v1.StepAsideForRestartResponse
+	169, // 354: apiary.rpc.v1.ManagerService.MutateColonyUpdate:output_type -> apiary.rpc.v1.MutateColonyUpdateResponse
+	313, // 355: apiary.rpc.v1.ManagerService.ExecuteNodeRestartPlan:output_type -> apiary.rpc.v1.ExecuteNodeRestartPlanResponse
+	322, // 356: apiary.rpc.v1.ManagerService.RequestManagerdRestart:output_type -> apiary.rpc.v1.RequestManagerdRestartResponse
+	324, // 357: apiary.rpc.v1.ManagerService.IssueManagerdRestart:output_type -> apiary.rpc.v1.IssueManagerdRestartResponse
+	171, // 358: apiary.rpc.v1.ManagerService.CreateNetwork:output_type -> apiary.rpc.v1.CreateNetworkResponse
+	173, // 359: apiary.rpc.v1.ManagerService.ListNetworks:output_type -> apiary.rpc.v1.ListNetworksResponse
+	175, // 360: apiary.rpc.v1.ManagerService.DeleteNetwork:output_type -> apiary.rpc.v1.DeleteNetworkResponse
+	177, // 361: apiary.rpc.v1.ManagerService.SetNetworkName:output_type -> apiary.rpc.v1.SetNetworkNameResponse
+	215, // 362: apiary.rpc.v1.ManagerService.CreateAPIKey:output_type -> apiary.rpc.v1.CreateAPIKeyResponse
+	217, // 363: apiary.rpc.v1.ManagerService.ListAPIKeys:output_type -> apiary.rpc.v1.ListAPIKeysResponse
+	219, // 364: apiary.rpc.v1.ManagerService.RevokeAPIKey:output_type -> apiary.rpc.v1.RevokeAPIKeyResponse
+	179, // 365: apiary.rpc.v1.ManagerService.CreateJail:output_type -> apiary.rpc.v1.CreateJailResponse
+	188, // 366: apiary.rpc.v1.ManagerService.UpdateJail:output_type -> apiary.rpc.v1.UpdateJailResponse
+	190, // 367: apiary.rpc.v1.ManagerService.DeleteJail:output_type -> apiary.rpc.v1.DeleteJailResponse
+	192, // 368: apiary.rpc.v1.ManagerService.SetJailDesiredState:output_type -> apiary.rpc.v1.SetJailDesiredStateResponse
+	194, // 369: apiary.rpc.v1.ManagerService.SetJailHostname:output_type -> apiary.rpc.v1.SetJailHostnameResponse
+	196, // 370: apiary.rpc.v1.ManagerService.GetJail:output_type -> apiary.rpc.v1.GetJailResponse
+	198, // 371: apiary.rpc.v1.ManagerService.ListJails:output_type -> apiary.rpc.v1.ListJailsResponse
+	200, // 372: apiary.rpc.v1.ManagerService.ListJailsLocal:output_type -> apiary.rpc.v1.ListJailsLocalResponse
+	186, // 373: apiary.rpc.v1.ManagerService.CreateCell:output_type -> apiary.rpc.v1.CreateCellResponse
+	184, // 374: apiary.rpc.v1.ManagerService.RecommendCellType:output_type -> apiary.rpc.v1.RecommendCellTypeResponse
+	202, // 375: apiary.rpc.v1.ManagerService.ForcePurgeJail:output_type -> apiary.rpc.v1.ForcePurgeJailResponse
+	221, // 376: apiary.rpc.v1.ManagerService.SimulateNodeFailure:output_type -> apiary.rpc.v1.SimulateNodeFailureResponse
+	228, // 377: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:output_type -> apiary.rpc.v1.SimulateNetworkFailureResponse
+	231, // 378: apiary.rpc.v1.ManagerService.TraceCellPath:output_type -> apiary.rpc.v1.TraceCellPathResponse
+	204, // 379: apiary.rpc.v1.ManagerService.MigrateJail:output_type -> apiary.rpc.v1.MigrateJailResponse
+	206, // 380: apiary.rpc.v1.ManagerService.ReportVMPhase:output_type -> apiary.rpc.v1.ReportVMPhaseResponse
+	208, // 381: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:output_type -> apiary.rpc.v1.ReportVMTeardownCompleteResponse
+	210, // 382: apiary.rpc.v1.ManagerService.ReportJailPhase:output_type -> apiary.rpc.v1.ReportJailPhaseResponse
+	212, // 383: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:output_type -> apiary.rpc.v1.ReportJailTeardownCompleteResponse
+	89,  // 384: apiary.rpc.v1.ManagerService.PushISOTo:output_type -> apiary.rpc.v1.PushISOToResponse
+	91,  // 385: apiary.rpc.v1.ManagerService.ListJailTemplateNames:output_type -> apiary.rpc.v1.ListJailTemplateNamesResponse
+	93,  // 386: apiary.rpc.v1.ManagerService.PushJailTemplateTo:output_type -> apiary.rpc.v1.PushJailTemplateToResponse
+	96,  // 387: apiary.rpc.v1.ManagerService.ReceiveJailTemplate:output_type -> apiary.rpc.v1.ReceiveJailTemplateResponse
+	317, // 388: apiary.rpc.v1.ManagerService.PushVMSnapshotTo:output_type -> apiary.rpc.v1.PushVMSnapshotToResponse
+	320, // 389: apiary.rpc.v1.ManagerService.ReceiveVMSnapshot:output_type -> apiary.rpc.v1.ReceiveVMSnapshotResponse
+	235, // 390: apiary.rpc.v1.ManagerService.GetLocalNetworkBridgeStatus:output_type -> apiary.rpc.v1.GetLocalNetworkBridgeStatusResponse
+	240, // 391: apiary.rpc.v1.ManagerService.ListAssumptionResults:output_type -> apiary.rpc.v1.ListAssumptionResultsResponse
+	242, // 392: apiary.rpc.v1.ManagerService.PurgeStaleAssumptionResults:output_type -> apiary.rpc.v1.PurgeStaleAssumptionResultsResponse
+	245, // 393: apiary.rpc.v1.ManagerService.ListOrphanedHASTResources:output_type -> apiary.rpc.v1.ListOrphanedHASTResourcesResponse
+	247, // 394: apiary.rpc.v1.ManagerService.CleanupOrphanedHASTResource:output_type -> apiary.rpc.v1.CleanupOrphanedHASTResourceResponse
+	249, // 395: apiary.rpc.v1.ManagerService.GetNetworkTeardownStatus:output_type -> apiary.rpc.v1.GetNetworkTeardownStatusResponse
+	252, // 396: apiary.rpc.v1.ManagerService.RequestJoinColony:output_type -> apiary.rpc.v1.RequestJoinColonyResponse
+	254, // 397: apiary.rpc.v1.ManagerService.GetJoinRequestStatus:output_type -> apiary.rpc.v1.GetJoinRequestStatusResponse
+	256, // 398: apiary.rpc.v1.ManagerService.GetMemberRestartGuardrailCredential:output_type -> apiary.rpc.v1.GetMemberRestartGuardrailCredentialResponse
+	258, // 399: apiary.rpc.v1.ManagerService.ListJoinRequests:output_type -> apiary.rpc.v1.ListJoinRequestsResponse
+	260, // 400: apiary.rpc.v1.ManagerService.ApproveJoinRequest:output_type -> apiary.rpc.v1.ApproveJoinRequestResponse
+	290, // 401: apiary.rpc.v1.ManagerService.RejectJoinRequest:output_type -> apiary.rpc.v1.RejectJoinRequestResponse
+	262, // 402: apiary.rpc.v1.ManagerService.VerifyJoinIntroduction:output_type -> apiary.rpc.v1.VerifyJoinIntroductionResponse
+	264, // 403: apiary.rpc.v1.ManagerService.ReissueJoinSecondPin:output_type -> apiary.rpc.v1.ReissueJoinSecondPinResponse
+	267, // 404: apiary.rpc.v1.ManagerService.PinPeerCertificate:output_type -> apiary.rpc.v1.PinPeerCertificateResponse
+	275, // 405: apiary.rpc.v1.ManagerService.UnpinPeerCertificate:output_type -> apiary.rpc.v1.UnpinPeerCertificateResponse
+	269, // 406: apiary.rpc.v1.ManagerService.TransitionPeerCertificate:output_type -> apiary.rpc.v1.TransitionPeerCertificateResponse
+	271, // 407: apiary.rpc.v1.ManagerService.ActivatePeerCertificateTransition:output_type -> apiary.rpc.v1.ActivatePeerCertificateTransitionResponse
+	273, // 408: apiary.rpc.v1.ManagerService.AbandonPeerCertificateTransition:output_type -> apiary.rpc.v1.AbandonPeerCertificateTransitionResponse
+	151, // 409: apiary.rpc.v1.ManagerService.PreflightApproveJoinRequest:output_type -> apiary.rpc.v1.PreflightApproveJoinRequestResponse
+	292, // 410: apiary.rpc.v1.ManagerService.CancelJoinRequest:output_type -> apiary.rpc.v1.CancelJoinRequestResponse
+	294, // 411: apiary.rpc.v1.ManagerService.PurgeJoinRequest:output_type -> apiary.rpc.v1.PurgeJoinRequestResponse
+	279, // 412: apiary.rpc.v1.ManagerService.OpenColonyJoinWindow:output_type -> apiary.rpc.v1.OpenColonyJoinWindowResponse
+	281, // 413: apiary.rpc.v1.ManagerService.CloseColonyJoinWindow:output_type -> apiary.rpc.v1.CloseColonyJoinWindowResponse
+	284, // 414: apiary.rpc.v1.ManagerService.SetColonyDiskSize:output_type -> apiary.rpc.v1.SetColonyDiskSizeResponse
+	286, // 415: apiary.rpc.v1.ManagerService.GetColonyDiskSize:output_type -> apiary.rpc.v1.GetColonyDiskSizeResponse
+	288, // 416: apiary.rpc.v1.ManagerService.GetColonyJoinWindow:output_type -> apiary.rpc.v1.GetColonyJoinWindowResponse
+	296, // 417: apiary.rpc.v1.ManagerService.UpdateVoterAddress:output_type -> apiary.rpc.v1.UpdateVoterAddressResponse
+	311, // 418: apiary.rpc.v1.ManagerService.HostPackages:output_type -> apiary.rpc.v1.HostPackagesResponse
+	297, // [297:419] is the sub-list for method output_type
+	175, // [175:297] is the sub-list for method input_type
+	175, // [175:175] is the sub-list for extension type_name
+	175, // [175:175] is the sub-list for extension extendee
+	0,   // [0:175] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -25837,7 +26273,7 @@ func file_api_rpc_manager_proto_init() {
 		(*MutateColonyUpdateRequest_Handover)(nil),
 	}
 	file_api_rpc_manager_proto_msgTypes[220].OneofWrappers = []any{}
-	file_api_rpc_manager_proto_msgTypes[294].OneofWrappers = []any{
+	file_api_rpc_manager_proto_msgTypes[300].OneofWrappers = []any{
 		(*ReceiveVMSnapshotRequest_Metadata)(nil),
 		(*ReceiveVMSnapshotRequest_Chunk)(nil),
 	}
@@ -25847,7 +26283,7 @@ func file_api_rpc_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
 			NumEnums:      19,
-			NumMessages:   301,
+			NumMessages:   307,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

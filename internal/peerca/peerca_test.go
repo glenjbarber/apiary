@@ -16,6 +16,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/hostcert"
+	"google.golang.org/protobuf/proto"
 )
 
 func testCert(t *testing.T, name string) *internalpb.TrustedPeer {
@@ -336,4 +337,93 @@ func TestWriteOfUnchangedContentIsNotAFailure(t *testing.T) {
 	if len(body) == 0 {
 		t.Error("the file is empty after repeated writes of a non-empty store")
 	}
+}
+
+// ADR-0170's overlap: while a transition is staged, BOTH the current
+// certificate and the staged one are trusted.
+//
+// This is the property the whole transition exists for. The Comb may
+// already be serving the incoming certificate while the transition is
+// staged, and its peers must be able to verify it - so the derived
+// file has to contain both, not just the current one.
+//
+// Writing only the current certificate would mean a Comb that had
+// already swapped its serving certificate could not be verified by
+// anybody, and the swap would look exactly like a certificate expiry.
+func TestRenderIncludesTheStagedCertificateDuringAnOverlap(t *testing.T) {
+	current := testCert(t, "drone")
+	staged := testCert(t, "drone-rotated")
+	current.Next = staged
+
+	body, err := Render([]*internalpb.TrustedPeer{current})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !bytes.Contains(body, []byte(current.GetCertPem())) {
+		t.Error("the rendered file does not contain the current certificate")
+	}
+	if !bytes.Contains(body, []byte(staged.GetCertPem())) {
+		t.Error("the rendered file does not contain the staged certificate; a Comb serving it could not be verified by anybody")
+	}
+
+	// And both must actually load as trust anchors, because the file's
+	// purpose is to be a CertPool and not a list of strings.
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(body) {
+		t.Fatal("the rendered file does not load as a certificate pool")
+	}
+	if !poolContains(t, pool, current.GetCertPem(), current.GetFingerprint()) {
+		t.Errorf("the pool does not verify the current certificate %s", current.GetFingerprint())
+	}
+	if !poolContains(t, pool, staged.GetCertPem(), staged.GetFingerprint()) {
+		t.Errorf("the pool does not verify the staged certificate %s; a Comb serving it could not be verified by anybody", staged.GetFingerprint())
+	}
+}
+
+// A pin with no staged certificate renders exactly as before: the
+// staged field must not change the file when nothing is staged.
+func TestRenderIsUnchangedWhenNothingIsStaged(t *testing.T) {
+	peer := testCert(t, "drone")
+	withoutNext := proto.Clone(peer).(*internalpb.TrustedPeer)
+	withoutNext.Next = nil
+
+	body, err := Render([]*internalpb.TrustedPeer{peer})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	plain, err := Render([]*internalpb.TrustedPeer{withoutNext})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !bytes.Equal(body, plain) {
+		t.Error("rendering changed when no certificate was staged")
+	}
+}
+
+// poolContains reports whether the pool can VERIFY the certificate
+// with the given fingerprint.
+//
+// x509.CertPool does not expose the certificates it holds, so the
+// check is made the way the pool is actually used: by verifying a
+// leaf against it. A self-signed serving certificate that is in the
+// pool verifies as its own root; one that is not in the pool does not.
+//
+// That is the property that matters here, and it is stronger than
+// "the PEM is in the file": it proves the file works as a trust
+// anchor, which is what every consumer of it uses it for.
+func poolContains(t *testing.T, pool *x509.CertPool, certPEM, fingerprint string) bool {
+	t.Helper()
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		t.Fatalf("the certificate for fingerprint %s is not PEM-encoded", fingerprint)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parsing the certificate for fingerprint %s: %v", fingerprint, err)
+	}
+	_, err = cert.Verify(x509.VerifyOptions{
+		Roots:     pool,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	return err == nil
 }

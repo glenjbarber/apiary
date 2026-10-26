@@ -874,6 +874,21 @@ func (f *fakeClient) UnpinPeerCertificate(_ context.Context, in *rpcpb.UnpinPeer
 	return &rpcpb.UnpinPeerCertificateResponse{}, nil
 }
 
+// The three ADR-0170 trust-transition calls. The frontend does not
+// use them - they are Admin-tier managerd acts with no page - so the
+// fake answers with an empty response.
+func (f *fakeClient) TransitionPeerCertificate(context.Context, *rpcpb.TransitionPeerCertificateRequest, ...grpc.CallOption) (*rpcpb.TransitionPeerCertificateResponse, error) {
+	return &rpcpb.TransitionPeerCertificateResponse{}, nil
+}
+
+func (f *fakeClient) ActivatePeerCertificateTransition(context.Context, *rpcpb.ActivatePeerCertificateTransitionRequest, ...grpc.CallOption) (*rpcpb.ActivatePeerCertificateTransitionResponse, error) {
+	return &rpcpb.ActivatePeerCertificateTransitionResponse{}, nil
+}
+
+func (f *fakeClient) AbandonPeerCertificateTransition(context.Context, *rpcpb.AbandonPeerCertificateTransitionRequest, ...grpc.CallOption) (*rpcpb.AbandonPeerCertificateTransitionResponse, error) {
+	return &rpcpb.AbandonPeerCertificateTransitionResponse{}, nil
+}
+
 func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
 	f.lastGetWindowReq = in
 	if f.getWindowErr != nil {

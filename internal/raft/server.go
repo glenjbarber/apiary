@@ -84,6 +84,22 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.ColonyUpdate != nil {
 		payload = result.ColonyUpdate
 	}
+	// TrustedPeer is the peer trust store's own result (ADR-0147 Part
+	// 4, and ADR-0170's transition). It has no arm of its own here,
+	// which means the pin and the transition both answered with an
+	// EMPTY peer: with no arm, payload stays nil for a command that
+	// set no VM, proto.Marshal(nil) yields zero bytes rather than an
+	// error, and the managerd side unmarshals those zero bytes into a
+	// zero-valued TrustedPeer.
+	//
+	// So a pin that SUCCEEDED reported a peer with no node_id, no
+	// fingerprint and no certificate - and a caller checking the
+	// response for the pin it just made would read it as nothing
+	// having been pinned. That is the same failure the ColonyJoinWindow
+	// arm's own comment describes, and it is why this arm is here.
+	if result.TrustedPeer != nil {
+		payload = result.TrustedPeer
+	}
 	// ColonyJoinWindow is the arm most easily forgotten, and forgetting
 	// it fails open rather than loudly: with no arm, payload stays
 	// result.VM (nil), proto.Marshal(nil) yields zero bytes rather than

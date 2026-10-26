@@ -123,19 +123,49 @@ func Render(peers []*internalpb.TrustedPeer) ([]byte, error) {
 		if pem == "" {
 			return nil, fmt.Errorf("peerca: the pin for node_id %q carries no certificate; the trust store and this file must not disagree", peer.GetNodeId())
 		}
-		// The PEM is stored already-normalized by the FSM (it round
-		// trips through hostcert.Evaluate before it is stored), so it
-		// is emitted as stored rather than re-encoded. Re-encoding
-		// would be a second definition of "the same certificate" and
-		// could differ from the bytes the pin's fingerprint was
-		// derived from, which is the one thing this file must never
-		// do.
-		buf.WriteString(pem)
-		if !bytes.HasSuffix([]byte(pem), []byte("\n")) {
-			buf.WriteString("\n")
+		writePEM(&buf, pem)
+		// ADR-0170's staged certificate is written ALONGSIDE the
+		// current one, not instead of it.
+		//
+		// This is the whole point of the overlap. The Comb may
+		// already be serving the incoming certificate while the
+		// transition is still staged, and its peers must be able to
+		// verify it - so both certificates are in the file, and the
+		// file is a pin LIST. Writing only the current one would
+		// mean a Comb that had already swapped its serving
+		// certificate could not be verified by anybody.
+		//
+		// The staged certificate's expiry is NOT consulted here. The
+		// overlap's end is enforced by the FSM - the staged entry is
+		// dropped when the overlap lapses - and this file is a cache
+		// of the store, not a second place that decides what is
+		// trusted. A reader that wanted to reason about expiry would
+		// have two sources of truth for it.
+		if staged := peer.GetNext(); staged != nil {
+			stagedPEM := staged.GetCertPem()
+			if stagedPEM == "" {
+				return nil, fmt.Errorf("peerca: the staged certificate for node_id %q carries no certificate; the trust store and this file must not disagree", peer.GetNodeId())
+			}
+			writePEM(&buf, stagedPEM)
 		}
 	}
 	return buf.Bytes(), nil
+}
+
+// writePEM appends one certificate PEM to the buffer, newline-
+// terminated.
+//
+// The bytes are emitted AS STORED rather than re-encoded. The PEM is
+// stored already-normalized by the FSM (it round trips through
+// hostcert.Evaluate before it is stored), and re-encoding would be a
+// second definition of "the same certificate" that could differ from
+// the bytes the pin's fingerprint was derived from - which is the one
+// thing this file must never do.
+func writePEM(buf *bytes.Buffer, pem string) {
+	buf.WriteString(pem)
+	if !bytes.HasSuffix([]byte(pem), []byte("\n")) {
+		buf.WriteString("\n")
+	}
 }
 
 // Write renders peers and writes the file atomically, 0600, root-owned.

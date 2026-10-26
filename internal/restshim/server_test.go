@@ -736,6 +736,21 @@ func (f *fakeClient) UnpinPeerCertificate(context.Context, *rpcpb.UnpinPeerCerti
 	return &rpcpb.UnpinPeerCertificateResponse{}, nil
 }
 
+// The three ADR-0170 trust-transition calls. The REST shim does not
+// expose them - they are Admin-tier managerd acts with no route - so
+// the fake answers with an empty response.
+func (f *fakeClient) TransitionPeerCertificate(context.Context, *rpcpb.TransitionPeerCertificateRequest, ...grpc.CallOption) (*rpcpb.TransitionPeerCertificateResponse, error) {
+	return &rpcpb.TransitionPeerCertificateResponse{}, nil
+}
+
+func (f *fakeClient) ActivatePeerCertificateTransition(context.Context, *rpcpb.ActivatePeerCertificateTransitionRequest, ...grpc.CallOption) (*rpcpb.ActivatePeerCertificateTransitionResponse, error) {
+	return &rpcpb.ActivatePeerCertificateTransitionResponse{}, nil
+}
+
+func (f *fakeClient) AbandonPeerCertificateTransition(context.Context, *rpcpb.AbandonPeerCertificateTransitionRequest, ...grpc.CallOption) (*rpcpb.AbandonPeerCertificateTransitionResponse, error) {
+	return &rpcpb.AbandonPeerCertificateTransitionResponse{}, nil
+}
+
 // RequestManagerdRestart and IssueManagerdRestart are ADR-0146's
 // managerd self-restart handoff. Nothing in this package's request path
 // calls either - there is deliberately no UI control and no REST route

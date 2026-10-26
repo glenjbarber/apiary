@@ -632,7 +632,14 @@ func (s *Server) PinPeerCertificate(ctx context.Context, req *rpcpb.PinPeerCerti
 	// certificate. The FSM refuses a pin whose stated values disagree
 	// with its own PEM, so this is belt to that braces - but doing it
 	// here means the refusal names the real cause.
-	peer := proto.Clone(req.GetPeer()).(*internalpb.TrustedPeer)
+	// The external and internal TrustedPeer are DIFFERENT PROTOBUF
+	// TYPES. Cloning the RPC one and asserting it as the internal one
+	// panicked on every call to this RPC; the conversion is explicit
+	// and field-by-field now. See toInternalTrustedPeer.
+	peer := toInternalTrustedPeer(req.GetPeer())
+	if peer == nil {
+		return &rpcpb.PinPeerCertificateResponse{Error: "the peer to pin is required"}, nil
+	}
 	info, err := hostcert.Evaluate([]byte(peer.GetCertPem()), hostcert.EvaluateOptions{
 		Now:                time.Unix(peer.GetPinnedAtUnix(), 0).UTC(),
 		RequireDNSSAN:      true,
