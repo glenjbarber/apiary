@@ -923,7 +923,13 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"placementUnavailableFor":  placementUnavailableFor,
 		"hostPackagesLink":         hostPackagesLink,
 		"deadlineLocal":            deadlineLocal,
-		"remainingText":            remainingText}).ParseFS(web.FS, "templates/*.html")
+		"remainingText":            remainingText,
+		// replicaOptions renders the replica-node picker with the
+		// chosen owner excluded. The rule lives in Go
+		// (replicaNodeOptions), so the browser never mirrors it.
+		"replicaOptions": func(nodes []string, owner string) replicaOptionsView {
+			return replicaOptionsView{Nodes: replicaNodeOptions(nodes, owner)}
+		}}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
 	}
@@ -1288,6 +1294,10 @@ func (s *Server) routes() {
 	// with step 1 already answered. The POST endpoints and the RPCs
 	// behind them are unchanged.
 	s.mux.HandleFunc("GET /create", s.requireRole(manager.RoleOperator, s.handleCreateGuidedPage))
+	// The wizard's replica-node picker, rendered with the chosen owner
+	// excluded. The rule lives in Go, so the browser never has to
+	// mirror it - see internal/frontend/replicanodes_route.go.
+	s.mux.HandleFunc("GET /create/replica-nodes", s.requireRole(manager.RoleOperator, s.handleReplicaNodeOptions))
 	s.mux.HandleFunc("GET /vms/new", s.requireRole(manager.RoleOperator, s.handleNewVMPage))
 	s.mux.HandleFunc("POST /vms", s.requireRole(manager.RoleOperator, s.handleCreateVM))
 	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))

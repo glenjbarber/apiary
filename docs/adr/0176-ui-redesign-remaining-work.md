@@ -29,7 +29,7 @@ Checked against the tree, section by section:
 | Section | What it promised | State |
 | --- | --- | --- |
 | A | Design-system primitives, the tokens, and the `CombTree` sidebar | Primitives and tokens are in the tree. **The `CombTree` is not** - the sidebar still renders a flat list of Comb IDs. |
-| B | A multi-pane, server-driven creation wizard | **Not in the tree.** `create_guided.html` is still the single-page implementation with its step-toggle JS. |
+| B | A multi-pane, server-driven creation wizard | **In the tree, in substance.** `create_guided.html` has the rail, the named panes, the Review pane, and the placement gap closed. What was missing was the replica exclusion, and that is now server-side. |
 | C | The dashboard `HealthCard` and per-node gauges | In the tree. |
 | D | Image-kind labels and bridge-health chips | In the tree. |
 | E | Service-status and role chips | In the tree. |
@@ -48,17 +48,23 @@ now applies it as `disabled` on the owner-node `<option>` itself
 where it matters, even though the wizard's SHAPE is not what the spec
 described.
 
-**The wizard's step JS still restates the server's rules.** The
-script's own comment says "the server is the authority - if the two
-ever disagree, the server wins and says so - but the point of
-restating them here is that an operator should never have to submit
-something only to be told it was impossible."
+**The replica-node exclusion was the wizard's remaining JS-mirrored
+rule.** The wizard's Placement pane offers a replica Comb, and the
+replica cannot be the owner - HAST replicates a disk between two
+DIFFERENT Combs. The server always refused that pairing on submit,
+but the template's JavaScript was the only thing that stopped it being
+OFFERED, and a rule that lives in two places is two chances to be
+wrong.
 
-That is a reasonable intent, and it is also exactly the shape the spec
-says to delete: a second copy of the rules, in a different language, on
-a different side of the wire. The spec's argument against it is the
-one that matters - "client JS mirroring server rules is exactly how the
-placement-pane gap happened".
+That is the same shape as the placement gap the spec names: "client JS
+mirroring server rules is exactly how the placement-pane gap happened
+- a rule existed in one place (`placementUnavailable`) and the
+template's own JS never learned about it."
+
+So the rule moved to Go. `replicaNodeOptions` is the one implementation,
+the picker is a server-rendered fragment that the Placement pane
+refreshes when the owner changes, and the JavaScript that mirrored the
+rule is deleted.
 
 ## Decision
 
@@ -86,19 +92,18 @@ already gathers - `clusterNodeEvidence` - rather than a second read.
 The sidebar and the Command Center must not be able to disagree about
 a Comb's state, and two fetches are two moments.
 
-**2. The creation wizard.** `create_guided.html`'s single-page
-implementation and its step-toggle JS are replaced by a pane-based
-wizard whose panes are rendered from the same Go data the final POST
-validates against, so the server is the only place that decides what a
-pane may offer.
+**2. The creation wizard's replica exclusion.** The wizard's rail,
+named panes and Review pane are already in the tree, so the work here
+is the ONE rule the browser was still mirroring: the replica-node
+exclusion. It moves to Go, the picker becomes a server-rendered
+fragment, and the JavaScript that mirrored it is deleted.
 
 **The wizard's panes POST to the SAME `/vms` and `/jails` endpoints.**
 The spec is explicit that `internal/frontend/create_guided.go`'s routing
 is kept verbatim, and the panes are a framing change over an unchanged
 submit path. That is what keeps this a redesign rather than a rewrite.
 
-**The rules the JS restated are DELETED, not ported.** The client's
-copies of the server's rules go away with the step-toggle JS. Where an
+**The JS that mirrored the rule is DELETED, not ported.** Where an
 operator needs to know why an option is unavailable, the server says
 why - in the option's own `title` - rather than the browser
 re-deriving it.
@@ -118,10 +123,10 @@ having scrolled past fields that may have changed underneath them.
 - The wizard offers only valid options, because the server decides -
   the class of bug the placement gap was is structurally impossible
   rather than fixed once.
-- The client's copy of the server's rules is gone, so the two cannot
+- The client's copy of the replica rule is gone, so the two cannot
   drift.
-- The wizard's framing changes but its submit path does not, so the
-  validation rules and their tests are untouched.
+- The wizard's submit path does not change, so the validation rules and
+  their tests are untouched.
 - The preview harness remains the way each piece is verified
   visually, which is this project's own convention.
 

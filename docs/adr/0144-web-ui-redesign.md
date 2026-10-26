@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Sections A, C, D, E and F are implemented and in `main`.
-**Sections A's `CombTree` and B's wizard were NOT** - see ADR-0176 for
-the accounting and for what was delivered instead.
+Accepted and implemented. Sections A, C, D, E and F are in `main`,
+and Section B's wizard is in `main` in substance - the rail, the named
+panes, the Review pane, and the placement gap closed. The one rule the
+browser was still mirroring, the replica-node exclusion, is now
+server-side. ADR-0176 records the accounting and the one change.
 
 A is the design-system primitives (`internal/frontend/gauge.go`,
 `internal/frontend/health_card.go`,
@@ -12,9 +14,9 @@ A is the design-system primitives (`internal/frontend/gauge.go`,
 six `--status-*` tokens), plus the sidebar's Colony tree
 (`internal/frontend/combtree.go`), which ADR-0176 delivered. B's
 `placementUnavailable` is applied as `disabled` on the owner-node
-`<option>` itself, which was the gap this ADR was written to close -
-but the wizard's multi-pane SHAPE is still the single-page
-implementation, also per ADR-0176. C is the dashboard `HealthCard` and
+`<option>` itself, which was the gap this ADR was written to close, and
+the replica-node exclusion moved server-side too, so no rule is
+mirrored in the browser (ADR-0176). C is the dashboard `HealthCard` and
 per-node gauges (`web/templates/cluster_overview.html`,
 `internal/frontend/cluster_overview.go`). D is the image-kind labels
 and bridge-health chips (`web/templates/images.html`,
@@ -31,7 +33,8 @@ spec `docs/web-ui-redesign.md` said the opposite at its own top -
 "awaiting review before any code changes". Both were partly true and
 neither was usable: one overstated what was built and the other
 understated it. They are now brought into agreement with each other
-and with the tree.
+and with the tree - and the accounting that surfaced the discrepancy
+is in ADR-0176.
 
 Two points where the code settled differently from the design text
 below, each recorded in its own delivery commit rather than here.
