@@ -171,6 +171,13 @@ type fakeClient struct {
 	getRaftdConfigResp *rpcpb.GetRaftdConfigResponse
 	statusErr          error
 
+	// listCalls counts ListVMs RPCs, so a test can assert that a
+	// sidebar render reads the cell list ONCE rather than once per
+	// Comb.
+	listCalls int
+	// jailCalls counts ListJails RPCs, for the same reason.
+	jailCalls int
+
 	// statusCalls counts Status RPCs so a test can assert the header's
 	// Colony-leader indicator (ADR-0123) does not cost a page a second
 	// Status call on pages that already fetched one.
@@ -626,6 +633,7 @@ func (f *fakeClient) GetLocalHASTResourceStatus(context.Context, *rpcpb.GetLocal
 }
 
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {
+	f.listCalls++
 	return f.listResp, f.listErr
 }
 
@@ -1086,6 +1094,7 @@ func (f *fakeClient) GetJail(context.Context, *rpcpb.GetJailRequest, ...grpc.Cal
 }
 
 func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc.CallOption) (*rpcpb.ListJailsResponse, error) {
+	f.jailCalls++
 	if f.listJailsResp != nil {
 		return f.listJailsResp, nil
 	}

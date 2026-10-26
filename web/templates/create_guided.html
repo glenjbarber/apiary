@@ -1,3 +1,29 @@
+{{/*
+  The replica-node picker.
+
+  The list is rendered with the chosen OWNER excluded, because HAST
+  replicates a disk between two different Combs and replicating onto
+  the Comb that already holds it is not a thing HAST can do.
+
+  The exclusion is applied in Go (internal/frontend/replicanodes.go),
+  not here and not in the browser's JavaScript. That is the point of
+  the whole exercise: a rule that exists in one place and is mirrored
+  in another is two chances to be wrong, and the spec records that the
+  placement-pane gap happened exactly that way.
+*/}}
+{{define "replica_node_options"}}
+{{if .Nodes}}
+<select name="replica_node_id" id="replica-node" title="A second Comb to keep a live HAST-replicated copy of this workload's disk on. Leave as None for no replica.">
+  <option value="">None</option>
+  {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+</select>
+{{else}}
+<select name="replica_node_id" id="replica-node" disabled title="No Comb other than the owner can hold a replica.">
+  <option value="">None</option>
+</select>
+{{end}}
+{{end}}
+
 {{define "create_guided_page"}}
 {{/*
   The guided creation wizard, replacing the separate new-VM and
@@ -121,9 +147,19 @@
             </label>
             <label>Replica node <span class="field-help">Optional HAST replication target - a live copy of the disk (VM) or root (jail) on a second Comb. Data redundancy, not automatic failover.</span>
           {{if .Nodes}}
-          <select name="replica_node_id" id="replica-node" title="A second Comb to keep a live HAST-replicated copy of this workload's disk on. Leave as None for no replica.">
-            <option value="">None</option>{{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
-          </select>
+          <div id="replica-node-slot"
+               hx-get="/create/replica-nodes"
+               hx-trigger="change from:#owner-node"
+               hx-target="#replica-node-slot"
+               hx-swap="innerHTML">
+            {{/*
+              The owner defaults to this Comb (the owner picker below
+              selects it), so the initial render excludes IT. Every
+              later change of owner re-renders this list from the
+              server, which is what keeps the rule in one place.
+            */}}
+            {{template "replica_node_options" (replicaOptions .Nodes .LocalNodeID)}}
+          </div>
           {{else}}
           <input type="text" name="replica_node_id" id="replica-node" title="A second Comb to keep a live HAST-replicated copy of this workload's disk on. Leave blank for no replica.">
           {{end}}
@@ -679,14 +715,25 @@
         }
       }
 
-      if (replicaNode) {
-        Array.prototype.forEach.call(replicaNode.options, function(opt) {
-          opt.disabled = !!opt.value && opt.value === owner;
-        });
-        if (replicaNode.value && replicaNode.value === owner) {
-          replicaNode.value = '';
-          notes.push('Replica node cleared: it was the same Comb as the owner node, and HAST replication runs between two different Combs.');
-        }
+      // The REPLICA list is not filtered here.
+      //
+      // It used to be: this function disabled the option equal to the
+      // owner, which is a second copy of a rule the server already
+      // enforces (and which the spec records as the cause of the
+      // placement-pane gap - "a rule existed in one place and the
+      // template's own JS never learned about it").
+      //
+      // Now the server renders the list with the owner excluded, and
+      // the Placement pane asks it to re-render when the owner changes
+      // (hx-trigger="change from:#owner-node" on #replica-node-slot).
+      // So there is one implementation of the rule, and it is the one
+      // the validator uses.
+      if (replicaNode && replicaNode.value && replicaNode.value === owner) {
+        // The owner changed to the Comb that was already the replica.
+        // The refreshed list will not contain it, so clear the stale
+        // selection rather than submitting an invalid pairing.
+        replicaNode.value = '';
+        notes.push('Replica node cleared: it was the same Comb as the owner node, and HAST replication runs between two different Combs.');
       }
       setText(placementCue, notes.join(' '));
     }

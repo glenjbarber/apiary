@@ -5,9 +5,12 @@ records the decision this spec implements. Read that first for the
 "why"; this document is the "how," at the level of detail a build
 session needs without re-deriving it from the templates each time.
 
-Status: **Proposed** - first checkpoint (this document) awaiting
-review before any code changes. Sections 4 and 6 double as the phased
-delivery plan: each lettered section (A-F) is one review checkpoint.
+Status: **Implemented**, with one rule moved. Sections A through F
+are in `main`. The `CombTree` sidebar and the wizard's server-rendered
+replica-node exclusion are the two pieces ADR-0176 accounts for; the
+design text below is unchanged and remains the record of what was
+decided, and where it and the tree disagree, ADR-0144 and ADR-0176
+say which is true.
 
 ## Ground truth this spec is built from
 
