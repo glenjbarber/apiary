@@ -3,6 +3,8 @@ package frontend
 import (
 	"net/http"
 	"strings"
+
+	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
 
 // The HTTP surface of the Blend overview (handoff sections 7.5, 8, 11).
@@ -91,7 +93,7 @@ func (s *Server) handleOverviewCombs(w http.ResponseWriter, r *http.Request) {
 	}
 	setCombViewCookie(w, r, view)
 
-	bundle := s.gatherOverview(r.Context(), r, nil, nil)
+	bundle := s.gatherOverviewForFragment(r)
 	bundle.Combs.View = view
 	s.render(w, "overview_combs", pageData{
 		Overview:   bundle,
@@ -109,14 +111,14 @@ func (s *Server) handleOverviewCombs(w http.ResponseWriter, r *http.Request) {
 // handler returns the LAST known content with the stale marker set,
 // rather than an empty line or an error page.
 func (s *Server) handleOverviewStatus(w http.ResponseWriter, r *http.Request) {
-	bundle := s.gatherOverview(r.Context(), r, nil, nil)
+	bundle := s.gatherOverviewForFragment(r)
 	s.render(w, "overview_status", pageData{Overview: bundle})
 }
 
 // handleOverviewAttention serves the Needs-attention list as a fragment
 // ("GET /overview/attention").
 func (s *Server) handleOverviewAttention(w http.ResponseWriter, r *http.Request) {
-	bundle := s.gatherOverview(r.Context(), r, nil, nil)
+	bundle := s.gatherOverviewForFragment(r)
 	s.render(w, "overview_attention", pageData{Overview: bundle})
 }
 
@@ -139,4 +141,21 @@ func (s *Server) handlePalette(w http.ResponseWriter, r *http.Request) {
 		PaletteQuery: query,
 		Palette:      s.paletteResults(r, query, pd.CanOperate, pd.CanAdmin),
 	})
+}
+
+// gatherOverviewForFragment gathers the overview's evidence for a
+// FRAGMENT route.
+//
+// A fragment has no page render of its own, so it has no Status
+// response to hand over - it has to make its own. That is one extra
+// RPC per refresh, and it is the price of the fragment: the full
+// page already holds a Status response, but a fragment is a separate
+// request with a separate context.
+//
+// It is ONE call, not one per Comb: gatherOverview takes the Status
+// response and reuses it for every row, and the per-Comb evidence
+// hangs off that single read.
+func (s *Server) gatherOverviewForFragment(r *http.Request) overviewBundle {
+	statusResp, statusErr := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	return s.gatherOverview(r.Context(), r, statusResp, statusErr)
 }

@@ -660,3 +660,55 @@ func TestOverviewRemoteCombMetersAreNotTheLocalHosts(t *testing.T) {
 		t.Error("the local Comb's row lost its own CPU reading; this test is not measuring what it means to")
 	}
 }
+
+// TestOverviewFragmentsCarryTheColony pins that the refreshing
+// fragments carry the SAME evidence the full page does.
+//
+// This is a regression guard for a real bug: the fragment routes
+// originally called gatherOverview with a NIL Status response, on the
+// assumption that a fragment had one to hand. A fragment does not - it
+// is a separate request with its own context - so every refresh
+// rendered an EMPTY Colony, and the page the operator was looking at
+// emptied itself every ten seconds.
+func TestOverviewFragmentsCarryTheColony(t *testing.T) {
+	for _, path := range []string{
+		"/overview/status",
+		"/overview/attention",
+		"/overview/combs?view=table",
+		"/overview/combs?view=cards",
+		"/overview/combs?view=matrix",
+	} {
+		t.Run(path, func(t *testing.T) {
+			client := overviewTestClient()
+			s := newTestServer(t, client)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "brood") {
+				t.Errorf("the fragment does not name the Colony's Combs, so a refresh would empty the page: %s", body)
+			}
+		})
+	}
+}
+
+// TestOverviewFragmentIsNotAWholePage pins that a fragment route
+// returns a fragment. A fragment that returned a full document would
+// nest a page inside the page.
+func TestOverviewFragmentIsNotAWholePage(t *testing.T) {
+	for _, path := range []string{"/overview/status", "/overview/attention", "/overview/combs?view=cards"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			newTestServer(t, overviewTestClient()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			body := rec.Body.String()
+			if strings.Contains(body, "<!DOCTYPE html>") {
+				t.Error("the fragment returned a whole document")
+			}
+			if strings.Contains(body, "<html") {
+				t.Error("the fragment returned a whole document")
+			}
+		})
+	}
+}
