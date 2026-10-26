@@ -573,10 +573,18 @@ func run() error {
 			Email:          cfg.AcmeEmail,
 			ZoneID:         cfg.CloudflareZoneID,
 		},
-		RestartService: func(service string) {
-			if _, err := srv.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: service}); err != nil {
-				log.Printf("managerd: certificate renewal: restarting %s: %v", service, err)
-			}
+		// A renewal is a NOTIFICATION, not an instruction to restart.
+		//
+		// The old behaviour restarted the service, which dropped the
+		// operator's web session and took the frontend down for a few
+		// seconds - for a renewal that had ALREADY taken effect,
+		// because the serving certificate is re-read on the next TLS
+		// handshake through internal/tlscache. The manual issuance path
+		// stopped doing this when the hot-reload landed; the renewal
+		// path had never been brought in line. ADR-0175 records it.
+		Renewed: func(entry origincert.InventoryEntry) {
+			log.Printf("managerd: certificate renewed: %s (service %s, expires %s)",
+				entry.Name, entry.Service, entry.ExpiresAt.UTC().Format(time.RFC3339))
 		},
 	}
 	// Every RPC (including UploadISO's stream) is gated by srv's own
