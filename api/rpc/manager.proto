@@ -878,6 +878,34 @@ service ManagerService {
   rpc PinPeerCertificate(PinPeerCertificateRequest) returns (PinPeerCertificateResponse);
   rpc UnpinPeerCertificate(UnpinPeerCertificateRequest) returns (UnpinPeerCertificateResponse);
 
+  // TransitionPeerCertificate/ActivatePeerCertificateTransition/
+  // AbandonPeerCertificateTransition are ADR-0170's authorized trust
+  // transition: replacing one Comb's pinned serving certificate with
+  // another, as ONE visible act, with a bounded overlap in which both
+  // certificates are trusted.
+  //
+  // They exist because the rotation described in PinTrustedPeer's own
+  // comment - unpin, then pin - has a window in which the Comb is
+  // trusted by NOBODY: peer-ca.pem is derived from the store, so the
+  // unpin removes the Comb's entry immediately. If the pin then fails,
+  // the Comb is left with no trust anchor and the only recovery is an
+  // out-of-band backfill in which an operator compares certificates by
+  // hand on every host.
+  //
+  // TransitionPeerCertificate STAGES the incoming certificate. Both
+  // certificates are then trusted, so the Comb may serve either one
+  // while the transition is staged. Activate promotes the staged
+  // certificate and drops the one it replaced. Abandon drops the
+  // staged certificate and keeps the current one, which is what an
+  // operator does when the incoming certificate turns out to be wrong.
+  //
+  // Like PinPeerCertificate, none of these can create or modify an
+  // authorization entry, and a pin is not a credential: nothing
+  // authenticates a caller by presenting one.
+  rpc TransitionPeerCertificate(TransitionPeerCertificateRequest) returns (TransitionPeerCertificateResponse);
+  rpc ActivatePeerCertificateTransition(ActivatePeerCertificateTransitionRequest) returns (ActivatePeerCertificateTransitionResponse);
+  rpc AbandonPeerCertificateTransition(AbandonPeerCertificateTransitionRequest) returns (AbandonPeerCertificateTransitionResponse);
+
   // PreflightApproveJoinRequest previews ApproveJoinRequest's own
   // reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
   // Admin-tier, not Viewer, because it makes managerd dial a
@@ -4388,12 +4416,81 @@ message TrustedPeer {
   int64 pinned_at_unix = 6;
   string pinned_by = 7;
   bool is_voter = 8;
+
+  // next is the STAGED certificate during an ADR-0170 trust
+  // transition: the one that is about to replace this one.
+  //
+  // While it is set, BOTH certificates are trusted - the current one
+  // and the staged one - so the Comb can already serve the incoming
+  // certificate while its peers can already verify it. It is dropped
+  // when the transition is activated or abandoned.
+  //
+  // Empty means nothing is staged, which is the shape every entry
+  // before ADR-0170 has.
+  TrustedPeer next = 9;
 }
 
 message PinPeerCertificateRequest {
   TrustedPeer peer = 1;
 }
 message PinPeerCertificateResponse {
+  TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+// TransitionPeerCertificateRequest asks the Colony to stage a new
+// serving certificate for a Comb that is already pinned.
+//
+// The certificate's fingerprint and expiry are RE-DERIVED by the
+// managerd and again by every replica, so the values supplied here are
+// checked rather than trusted.
+message TransitionPeerCertificateRequest {
+  // node_id is the Comb whose pinned certificate is being replaced. It
+  // must already be pinned.
+  string node_id = 1;
+
+  // next is the incoming certificate.
+  TrustedPeer next = 2;
+
+  // overlap_seconds is how long both certificates remain trusted.
+  // It is bounded on purpose: an unbounded staged certificate is a
+  // permanent second trust anchor.
+  int64 overlap_seconds = 3;
+
+  // reason is the operator's own account of why this certificate is
+  // being adopted. It is replicated with the transition, so an
+  // incident review can answer "why did this Comb's identity change".
+  string reason = 4;
+}
+
+message TransitionPeerCertificateResponse {
+  TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+// ActivatePeerCertificateTransitionRequest promotes a staged
+// certificate to current.
+message ActivatePeerCertificateTransitionRequest {
+  string node_id = 1;
+  string reason = 2;
+}
+
+message ActivatePeerCertificateTransitionResponse {
+  TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+// AbandonPeerCertificateTransitionRequest drops a staged certificate
+// and keeps the current one.
+message AbandonPeerCertificateTransitionRequest {
+  string node_id = 1;
+  string reason = 2;
+}
+
+message AbandonPeerCertificateTransitionResponse {
   TrustedPeer peer = 1;
   string error = 2;
   string leader_hint = 3;

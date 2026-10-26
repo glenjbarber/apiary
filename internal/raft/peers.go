@@ -246,3 +246,193 @@ func (f *FSM) listTrustedPeersLocked() []*internalpb.TrustedPeer {
 	}
 	return peers
 }
+
+// applyTransitionTrustedPeer stages a new certificate for a Comb that
+// is already pinned.
+//
+// ADR-0170's decision, and the reason this is a separate command
+// rather than an extension of applyPinTrustedPeer: the store's
+// create-only rule is narrowed in exactly one place here.
+//
+// The narrowing is safe because of WHAT this command does not do. It
+// does not overwrite the current certificate. It ADDS a staged one,
+// and the current one keeps being trusted for the whole overlap. So
+// the thing the create-only rule protects against - a certificate
+// somebody compared by hand being silently replaced - cannot happen
+// here: the old certificate remains in the store, in full, until an
+// explicit activation removes it.
+//
+// Every refusal names itself, because each is a different operator
+// problem and they are fixed in different places.
+//
+// The fingerprint and the expiry are RE-DERIVED here, not trusted,
+// for exactly the reason applyPinTrustedPeer re-derives them: the
+// writer is one managerd, and every other voter applies the same log
+// entry without having seen the PEM arrive over a socket.
+//
+// And the evaluation is as of overlap_expires_at_unix rather than the
+// wall clock, for the same determinism reason applyPinTrustedPeer
+// evaluates as of pinned_at_unix: this function runs on every voter
+// and again on every replay, so consulting time.Now() here would let
+// a replay years later reject an entry that originally succeeded and
+// leave replicas disagreeing about the store's contents.
+func (f *FSM) applyTransitionTrustedPeer(index uint64, cmd *internalpb.TransitionTrustedPeer) *FSMApplyResult {
+	nodeID := cmd.GetNodeId()
+	if nodeID == "" {
+		return &FSMApplyResult{Index: index, Error: "TransitionTrustedPeer: node_id must be set"}
+	}
+	next := cmd.GetNext()
+	if next == nil {
+		return &FSMApplyResult{Index: index, Error: "TransitionTrustedPeer: the incoming certificate must be set"}
+	}
+	if cmd.GetOverlapExpiresAtUnix() <= 0 {
+		return &FSMApplyResult{Index: index, Error: "TransitionTrustedPeer: overlap_expires_at_unix must be set; an unbounded staged certificate is a permanent second trust anchor"}
+	}
+	existing, exists := f.trustedPeers[nodeID]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"TransitionTrustedPeer: node_id %q is not pinned; a transition replaces a certificate somebody compared, and creating one here would trust a certificate nobody compared",
+			nodeID)}
+	}
+	if existing.GetNext() != nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"TransitionTrustedPeer: node_id %q already has a staged certificate; activate or abandon it before staging another, so the store's state for this node is never ambiguous",
+			nodeID)}
+	}
+	// The incoming certificate is evaluated exactly as a pin would be:
+	// the same gate, the same fail-closed rules, the same re-derivation.
+	// A certificate that would be refused as a pin is refused here.
+	info, err := hostcert.Evaluate([]byte(next.GetCertPem()), hostcert.EvaluateOptions{
+		Now:                time.Unix(cmd.GetOverlapExpiresAtUnix(), 0).UTC(),
+		RequireDNSSAN:      true,
+		RequireLoopbackSAN: true,
+	})
+	if err != nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("TransitionTrustedPeer: %v", err)}
+	}
+	if next.GetFingerprint() != info.Fingerprint {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"TransitionTrustedPeer: fingerprint %q does not match the digest of the certificate supplied (%s); a staged certificate must record what it actually stages",
+			next.GetFingerprint(), info.Fingerprint)}
+	}
+	if next.GetNotAfterUnix() != info.NotAfter.Unix() {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"TransitionTrustedPeer: not_after_unix %d does not match the certificate's own NotAfter %d",
+			next.GetNotAfterUnix(), info.NotAfter.Unix())}
+	}
+	// A staged certificate must not claim to be for a different node.
+	// The node_id is the store's key and the raft identity; a
+	// certificate for someone else staged here would be trusted under
+	// the wrong identity.
+	if next.GetNodeId() != "" && next.GetNodeId() != nodeID {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"TransitionTrustedPeer: the staged certificate names node_id %q but is being staged for %q",
+			next.GetNodeId(), nodeID)}
+	}
+	// Membership does not change when a certificate does. is_voter
+	// describes whether the Comb is a MEMBER, and a rotation is not a
+	// join.
+	staged := proto.Clone(next).(*internalpb.TrustedPeer)
+	staged.NodeId = nodeID
+	// The STAGED certificate is never a voter. is_voter describes
+	// whether the Comb is a MEMBER, and it belongs to the CURRENT
+	// certificate's entry, not to a certificate that is not yet
+	// serving. Carrying the membership flag on the staged entry
+	// would make a second, not-yet-trusted certificate look like a
+	// member's own.
+	//
+	// The membership is carried forward on ACTIVATION instead, where
+	// the staged certificate becomes the current one and inherits
+	// it there.
+	staged.IsVoter = false
+	if staged.GetPinnedBy() == "" {
+		staged.PinnedBy = existing.GetPinnedBy()
+	}
+	if staged.GetPinnedAtUnix() == 0 {
+		staged.PinnedAtUnix = existing.GetPinnedAtUnix()
+	}
+
+	updated := proto.Clone(existing).(*internalpb.TrustedPeer)
+	updated.Next = staged
+	f.trustedPeers[nodeID] = updated
+	return &FSMApplyResult{Index: index, TrustedPeer: updated}
+}
+
+// applyActivateTrustedPeerTransition promotes a staged certificate to
+// current and drops the one it replaces.
+//
+// The OLD certificate is dropped here rather than at staging, so the
+// overlap covers the whole period in which the Comb might be serving
+// either certificate. Dropping it earlier would leave a window in
+// which the Comb serves the new certificate and its peers trust only
+// the old one.
+//
+// The new certificate's fingerprint and expiry are re-derived once
+// more, from the staged PEM, rather than carried forward from the
+// staging command. That is not redundant: the staged entry is
+// replicated state that a replica may have adopted from a snapshot
+// rather than from the original log entry, and this is the last point
+// at which the certificate that becomes the Comb's trust anchor is
+// checked against its own bytes.
+func (f *FSM) applyActivateTrustedPeerTransition(index uint64, cmd *internalpb.ActivateTrustedPeerTransition) *FSMApplyResult {
+	nodeID := cmd.GetNodeId()
+	if nodeID == "" {
+		return &FSMApplyResult{Index: index, Error: "ActivateTrustedPeerTransition: node_id must be set"}
+	}
+	existing, exists := f.trustedPeers[nodeID]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("ActivateTrustedPeerTransition: node_id %q is not pinned", nodeID)}
+	}
+	staged := existing.GetNext()
+	if staged == nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"ActivateTrustedPeerTransition: node_id %q has no staged certificate to activate", nodeID)}
+	}
+	info, err := hostcert.Evaluate([]byte(staged.GetCertPem()), hostcert.EvaluateOptions{
+		Now:                time.Unix(staged.GetNotAfterUnix(), 0).UTC(),
+		RequireDNSSAN:      true,
+		RequireLoopbackSAN: true,
+	})
+	if err != nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("ActivateTrustedPeerTransition: %v", err)}
+	}
+	if staged.GetFingerprint() != info.Fingerprint {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"ActivateTrustedPeerTransition: the staged certificate's fingerprint (%s) does not match its own digest (%s)",
+			staged.GetFingerprint(), info.Fingerprint)}
+	}
+	activated := proto.Clone(staged).(*internalpb.TrustedPeer)
+	activated.NodeId = nodeID
+	// Membership carries forward untouched: activating a certificate
+	// is not a join, and a Comb that was a voter stays one.
+	activated.IsVoter = existing.GetIsVoter()
+	activated.Next = nil
+	f.trustedPeers[nodeID] = activated
+	return &FSMApplyResult{Index: index, TrustedPeer: activated}
+}
+
+// applyAbandonTrustedPeerTransition drops a staged certificate and
+// keeps the current one.
+//
+// It exists for the failure case: a staged certificate that turns out
+// to be wrong is dropped, and the Comb carries on with the certificate
+// its peers already trust. Without this, the only way to clear a bad
+// staged certificate would be to activate it.
+func (f *FSM) applyAbandonTrustedPeerTransition(index uint64, cmd *internalpb.AbandonTrustedPeerTransition) *FSMApplyResult {
+	nodeID := cmd.GetNodeId()
+	if nodeID == "" {
+		return &FSMApplyResult{Index: index, Error: "AbandonTrustedPeerTransition: node_id must be set"}
+	}
+	existing, exists := f.trustedPeers[nodeID]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("AbandonTrustedPeerTransition: node_id %q is not pinned", nodeID)}
+	}
+	if existing.GetNext() == nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"AbandonTrustedPeerTransition: node_id %q has no staged certificate to abandon", nodeID)}
+	}
+	updated := proto.Clone(existing).(*internalpb.TrustedPeer)
+	updated.Next = nil
+	f.trustedPeers[nodeID] = updated
+	return &FSMApplyResult{Index: index, TrustedPeer: updated}
+}

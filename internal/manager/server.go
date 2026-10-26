@@ -215,6 +215,13 @@ type PeerForwarder interface {
 	ReissueJoinSecondPin(ctx context.Context, addr string, req *rpcpb.ReissueJoinSecondPinRequest) (*rpcpb.ReissueJoinSecondPinResponse, error)
 	PinPeerCertificate(ctx context.Context, addr string, req *rpcpb.PinPeerCertificateRequest) (*rpcpb.PinPeerCertificateResponse, error)
 	UnpinPeerCertificate(ctx context.Context, addr string, req *rpcpb.UnpinPeerCertificateRequest) (*rpcpb.UnpinPeerCertificateResponse, error)
+
+	// The three ADR-0170 trust-transition calls forward to the leader
+	// for the same reason the two above do: a transition mutates the
+	// replicated peer trust store, and only the leader may do that.
+	TransitionPeerCertificate(ctx context.Context, addr string, req *rpcpb.TransitionPeerCertificateRequest) (*rpcpb.TransitionPeerCertificateResponse, error)
+	ActivatePeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.ActivatePeerCertificateTransitionRequest) (*rpcpb.ActivatePeerCertificateTransitionResponse, error)
+	AbandonPeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.AbandonPeerCertificateTransitionRequest) (*rpcpb.AbandonPeerCertificateTransitionResponse, error)
 	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
 
 	// CancelJoinRequest/PurgeJoinRequest mirror RequestJoinColony/

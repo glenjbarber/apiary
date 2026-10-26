@@ -1145,6 +1145,38 @@ func (p *PeerReporter) UnpinPeerCertificate(ctx context.Context, addr string, re
 	return client.UnpinPeerCertificate(ctx, req)
 }
 
+// The three ADR-0170 trust-transition calls forward on a leader-hint
+// rejection, exactly as PinPeerCertificate and UnpinPeerCertificate
+// above do. They are leader-only acts - the transition mutates the
+// replicated trust store - so a follower forwards rather than
+// answering.
+func (p *PeerReporter) TransitionPeerCertificate(ctx context.Context, addr string, req *rpcpb.TransitionPeerCertificateRequest) (*rpcpb.TransitionPeerCertificateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.TransitionPeerCertificate(ctx, req)
+}
+
+func (p *PeerReporter) ActivatePeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.ActivatePeerCertificateTransitionRequest) (*rpcpb.ActivatePeerCertificateTransitionResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ActivatePeerCertificateTransition(ctx, req)
+}
+
+func (p *PeerReporter) AbandonPeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.AbandonPeerCertificateTransitionRequest) (*rpcpb.AbandonPeerCertificateTransitionResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.AbandonPeerCertificateTransition(ctx, req)
+}
+
 // OpenColonyJoinWindow/CloseColonyJoinWindow forward on a leader-hint
 // rejection, mirroring ApproveJoinRequest above exactly (ADR-0147
 // Part 4). addr is this node's own trusted, internally-derived notion

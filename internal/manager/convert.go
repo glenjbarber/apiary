@@ -208,6 +208,42 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 	}
 }
 
+// toInternalTrustedPeer mirrors an external rpcpb.TrustedPeer onto the
+// internal one.
+//
+// It exists because the two are DIFFERENT PROTOBUF TYPES, not one type
+// under two names. proto.Clone of an rpcpb.TrustedPeer yields an
+// rpcpb.TrustedPeer, so asserting it as an internalpb.TrustedPeer
+// panics at runtime - which is what PinPeerCertificate did, and
+// therefore what every call to that RPC did.
+//
+// The conversion is explicit and field-by-field rather than a clone
+// with an assertion, for two reasons. It cannot panic, and it cannot
+// silently carry a field across that the two schemas spell
+// differently. A new field added to one side and not the other is
+// then a COMPILE error rather than a value that quietly means
+// something else on the other side.
+//
+// The nested staged certificate is converted too: ADR-0170's overlap
+// lives in the `next` field, and a conversion that dropped it would
+// quietly lose a staged certificate on its way into the store.
+func toInternalTrustedPeer(p *rpcpb.TrustedPeer) *internalpb.TrustedPeer {
+	if p == nil {
+		return nil
+	}
+	return &internalpb.TrustedPeer{
+		NodeId:       p.GetNodeId(),
+		CombName:     p.GetCombName(),
+		Fingerprint:  p.GetFingerprint(),
+		CertPem:      p.GetCertPem(),
+		NotAfterUnix: p.GetNotAfterUnix(),
+		PinnedAtUnix: p.GetPinnedAtUnix(),
+		PinnedBy:     p.GetPinnedBy(),
+		IsVoter:      p.GetIsVoter(),
+		Next:         toInternalTrustedPeer(p.GetNext()),
+	}
+}
+
 // toRPCTustedPeer mirrors internalpb.TrustedPeer onto the external
 // message PinPeerCertificate/UnpinPeerCertificate carry.
 func toRPCTustedPeer(p *internalpb.TrustedPeer) *rpcpb.TrustedPeer {
@@ -223,6 +259,12 @@ func toRPCTustedPeer(p *internalpb.TrustedPeer) *rpcpb.TrustedPeer {
 		PinnedAtUnix: p.GetPinnedAtUnix(),
 		PinnedBy:     p.GetPinnedBy(),
 		IsVoter:      p.GetIsVoter(),
+		// next is the STAGED certificate during an ADR-0170 trust
+		// transition. It is carried onto the wire so an operator can
+		// SEE that a transition is in flight - a staged certificate
+		// that no page renders is a staged certificate nobody knows
+		// about.
+		Next: toRPCTustedPeer(p.GetNext()),
 	}
 }
 

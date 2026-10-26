@@ -276,6 +276,15 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetTrustedPeerVoter(log.Index, op.SetTrustedPeerVoter)
 	case *internalpb.Command_UnpinTrustedPeer:
 		return f.applyUnpinTrustedPeer(log.Index, op.UnpinTrustedPeer)
+	case *internalpb.Command_TransitionTrustedPeer:
+		// ADR-0170's authorized trust transition. Staging a new
+		// certificate for an already-pinned Comb, with a bounded
+		// overlap in which both are trusted.
+		return f.applyTransitionTrustedPeer(log.Index, op.TransitionTrustedPeer)
+	case *internalpb.Command_ActivateTrustedPeerTransition:
+		return f.applyActivateTrustedPeerTransition(log.Index, op.ActivateTrustedPeerTransition)
+	case *internalpb.Command_AbandonTrustedPeerTransition:
+		return f.applyAbandonTrustedPeerTransition(log.Index, op.AbandonTrustedPeerTransition)
 	case *internalpb.Command_SetColonyDiskSize:
 		// ADR-0148. The monotonicity check is inside the apply
 		// function, not in any handler, so every replica decides

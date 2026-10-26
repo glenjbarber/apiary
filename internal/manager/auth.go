@@ -347,6 +347,24 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/PinPeerCertificate":   RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UnpinPeerCertificate": RoleAdmin,
 
+	// TransitionPeerCertificate/ActivatePeerCertificateTransition/
+	// AbandonPeerCertificateTransition (ADR-0170) are Admin for the
+	// same reason the two above are: a transition decides which
+	// certificate this Colony will accept from a Comb, and that is a
+	// standing trust anchor.
+	//
+	// The activation and the abandonment are Admin rather than
+	// automatic for a reason worth stating. A transition that was
+	// staged for the wrong reason, or that staged a certificate which
+	// turns out to be bad, must be able to be undone - and the undo
+	// has to be an authorized act rather than a side effect of a
+	// timer, because the choice between "activate" and "abandon"
+	// depends on facts only an operator or the Colony's own evidence
+	// has.
+	"/apiary.rpc.v1.ManagerService/TransitionPeerCertificate":         RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition":  RoleAdmin,
+
 	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
 	// live dial to a caller-influenced address (only a local raft-
 	// internal state read) - Viewer-tier, matching

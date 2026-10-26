@@ -128,6 +128,9 @@ const (
 	ManagerService_ReissueJoinSecondPin_FullMethodName                = "/apiary.rpc.v1.ManagerService/ReissueJoinSecondPin"
 	ManagerService_PinPeerCertificate_FullMethodName                  = "/apiary.rpc.v1.ManagerService/PinPeerCertificate"
 	ManagerService_UnpinPeerCertificate_FullMethodName                = "/apiary.rpc.v1.ManagerService/UnpinPeerCertificate"
+	ManagerService_TransitionPeerCertificate_FullMethodName           = "/apiary.rpc.v1.ManagerService/TransitionPeerCertificate"
+	ManagerService_ActivatePeerCertificateTransition_FullMethodName   = "/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition"
+	ManagerService_AbandonPeerCertificateTransition_FullMethodName    = "/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition"
 	ManagerService_PreflightApproveJoinRequest_FullMethodName         = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName                    = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
@@ -955,6 +958,33 @@ type ManagerServiceClient interface {
 	// even if it is Admin-tier.
 	PinPeerCertificate(ctx context.Context, in *PinPeerCertificateRequest, opts ...grpc.CallOption) (*PinPeerCertificateResponse, error)
 	UnpinPeerCertificate(ctx context.Context, in *UnpinPeerCertificateRequest, opts ...grpc.CallOption) (*UnpinPeerCertificateResponse, error)
+	// TransitionPeerCertificate/ActivatePeerCertificateTransition/
+	// AbandonPeerCertificateTransition are ADR-0170's authorized trust
+	// transition: replacing one Comb's pinned serving certificate with
+	// another, as ONE visible act, with a bounded overlap in which both
+	// certificates are trusted.
+	//
+	// They exist because the rotation described in PinTrustedPeer's own
+	// comment - unpin, then pin - has a window in which the Comb is
+	// trusted by NOBODY: peer-ca.pem is derived from the store, so the
+	// unpin removes the Comb's entry immediately. If the pin then fails,
+	// the Comb is left with no trust anchor and the only recovery is an
+	// out-of-band backfill in which an operator compares certificates by
+	// hand on every host.
+	//
+	// TransitionPeerCertificate STAGES the incoming certificate. Both
+	// certificates are then trusted, so the Comb may serve either one
+	// while the transition is staged. Activate promotes the staged
+	// certificate and drops the one it replaced. Abandon drops the
+	// staged certificate and keeps the current one, which is what an
+	// operator does when the incoming certificate turns out to be wrong.
+	//
+	// Like PinPeerCertificate, none of these can create or modify an
+	// authorization entry, and a pin is not a credential: nothing
+	// authenticates a caller by presenting one.
+	TransitionPeerCertificate(ctx context.Context, in *TransitionPeerCertificateRequest, opts ...grpc.CallOption) (*TransitionPeerCertificateResponse, error)
+	ActivatePeerCertificateTransition(ctx context.Context, in *ActivatePeerCertificateTransitionRequest, opts ...grpc.CallOption) (*ActivatePeerCertificateTransitionResponse, error)
+	AbandonPeerCertificateTransition(ctx context.Context, in *AbandonPeerCertificateTransitionRequest, opts ...grpc.CallOption) (*AbandonPeerCertificateTransitionResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -2168,6 +2198,36 @@ func (c *managerServiceClient) UnpinPeerCertificate(ctx context.Context, in *Unp
 	return out, nil
 }
 
+func (c *managerServiceClient) TransitionPeerCertificate(ctx context.Context, in *TransitionPeerCertificateRequest, opts ...grpc.CallOption) (*TransitionPeerCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransitionPeerCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_TransitionPeerCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ActivatePeerCertificateTransition(ctx context.Context, in *ActivatePeerCertificateTransitionRequest, opts ...grpc.CallOption) (*ActivatePeerCertificateTransitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivatePeerCertificateTransitionResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ActivatePeerCertificateTransition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) AbandonPeerCertificateTransition(ctx context.Context, in *AbandonPeerCertificateTransitionRequest, opts ...grpc.CallOption) (*AbandonPeerCertificateTransitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AbandonPeerCertificateTransitionResponse)
+	err := c.cc.Invoke(ctx, ManagerService_AbandonPeerCertificateTransition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PreflightApproveJoinRequestResponse)
@@ -3083,6 +3143,33 @@ type ManagerServiceServer interface {
 	// even if it is Admin-tier.
 	PinPeerCertificate(context.Context, *PinPeerCertificateRequest) (*PinPeerCertificateResponse, error)
 	UnpinPeerCertificate(context.Context, *UnpinPeerCertificateRequest) (*UnpinPeerCertificateResponse, error)
+	// TransitionPeerCertificate/ActivatePeerCertificateTransition/
+	// AbandonPeerCertificateTransition are ADR-0170's authorized trust
+	// transition: replacing one Comb's pinned serving certificate with
+	// another, as ONE visible act, with a bounded overlap in which both
+	// certificates are trusted.
+	//
+	// They exist because the rotation described in PinTrustedPeer's own
+	// comment - unpin, then pin - has a window in which the Comb is
+	// trusted by NOBODY: peer-ca.pem is derived from the store, so the
+	// unpin removes the Comb's entry immediately. If the pin then fails,
+	// the Comb is left with no trust anchor and the only recovery is an
+	// out-of-band backfill in which an operator compares certificates by
+	// hand on every host.
+	//
+	// TransitionPeerCertificate STAGES the incoming certificate. Both
+	// certificates are then trusted, so the Comb may serve either one
+	// while the transition is staged. Activate promotes the staged
+	// certificate and drops the one it replaced. Abandon drops the
+	// staged certificate and keeps the current one, which is what an
+	// operator does when the incoming certificate turns out to be wrong.
+	//
+	// Like PinPeerCertificate, none of these can create or modify an
+	// authorization entry, and a pin is not a credential: nothing
+	// authenticates a caller by presenting one.
+	TransitionPeerCertificate(context.Context, *TransitionPeerCertificateRequest) (*TransitionPeerCertificateResponse, error)
+	ActivatePeerCertificateTransition(context.Context, *ActivatePeerCertificateTransitionRequest) (*ActivatePeerCertificateTransitionResponse, error)
+	AbandonPeerCertificateTransition(context.Context, *AbandonPeerCertificateTransitionRequest) (*AbandonPeerCertificateTransitionResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -3520,6 +3607,15 @@ func (UnimplementedManagerServiceServer) PinPeerCertificate(context.Context, *Pi
 }
 func (UnimplementedManagerServiceServer) UnpinPeerCertificate(context.Context, *UnpinPeerCertificateRequest) (*UnpinPeerCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UnpinPeerCertificate not implemented")
+}
+func (UnimplementedManagerServiceServer) TransitionPeerCertificate(context.Context, *TransitionPeerCertificateRequest) (*TransitionPeerCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TransitionPeerCertificate not implemented")
+}
+func (UnimplementedManagerServiceServer) ActivatePeerCertificateTransition(context.Context, *ActivatePeerCertificateTransitionRequest) (*ActivatePeerCertificateTransitionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ActivatePeerCertificateTransition not implemented")
+}
+func (UnimplementedManagerServiceServer) AbandonPeerCertificateTransition(context.Context, *AbandonPeerCertificateTransitionRequest) (*AbandonPeerCertificateTransitionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AbandonPeerCertificateTransition not implemented")
 }
 func (UnimplementedManagerServiceServer) PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightApproveJoinRequest not implemented")
@@ -5490,6 +5586,60 @@ func _ManagerService_UnpinPeerCertificate_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_TransitionPeerCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransitionPeerCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).TransitionPeerCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_TransitionPeerCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).TransitionPeerCertificate(ctx, req.(*TransitionPeerCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ActivatePeerCertificateTransition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ActivatePeerCertificateTransitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ActivatePeerCertificateTransition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ActivatePeerCertificateTransition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ActivatePeerCertificateTransition(ctx, req.(*ActivatePeerCertificateTransitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_AbandonPeerCertificateTransition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AbandonPeerCertificateTransitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).AbandonPeerCertificateTransition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_AbandonPeerCertificateTransition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).AbandonPeerCertificateTransition(ctx, req.(*AbandonPeerCertificateTransitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_PreflightApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PreflightApproveJoinRequestRequest)
 	if err := dec(in); err != nil {
@@ -6096,6 +6246,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UnpinPeerCertificate",
 			Handler:    _ManagerService_UnpinPeerCertificate_Handler,
+		},
+		{
+			MethodName: "TransitionPeerCertificate",
+			Handler:    _ManagerService_TransitionPeerCertificate_Handler,
+		},
+		{
+			MethodName: "ActivatePeerCertificateTransition",
+			Handler:    _ManagerService_ActivatePeerCertificateTransition_Handler,
+		},
+		{
+			MethodName: "AbandonPeerCertificateTransition",
+			Handler:    _ManagerService_AbandonPeerCertificateTransition_Handler,
 		},
 		{
 			MethodName: "PreflightApproveJoinRequest",

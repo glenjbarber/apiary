@@ -621,6 +621,26 @@ message Command {
     SetTrustedPeerVoter set_trusted_peer_voter = 39;
     UnpinTrustedPeer unpin_trusted_peer = 40;
 
+    // TransitionTrustedPeer/ActivateTrustedPeerTransition/
+    // AbandonTrustedPeerTransition are ADR-0170's authorized trust
+    // transition: replacing one Comb's pinned serving certificate
+    // with another, as one visible act, with a bounded overlap in
+    // which both are trusted.
+    //
+    // They are a new command rather than an extension of
+    // PinTrustedPeer because the store's create-only rule is
+    // narrowed in exactly one place here, and narrowing it inside
+    // PinTrustedPeer would have made "create" and "replace" the same
+    // command - which is the silent replacement the create-only rule
+    // exists to prevent.
+    //
+    // Fields 49/50/51 rather than reusing anything: protobuf field
+    // numbers are a permanent wire contract, and ADR-0147 Part 4's
+    // 38/39/40 are already replicated and shipped.
+    TransitionTrustedPeer transition_trusted_peer = 49;
+    ActivateTrustedPeerTransition activate_trusted_peer_transition = 50;
+    AbandonTrustedPeerTransition abandon_trusted_peer_transition = 51;
+
     // RecordJoinApproval is ADR-0147 Part 3's two-person rule: one
     // authorizing act, recorded in replicated state, that resolves
     // nothing. Replicated rather than node-local for the same reason
@@ -1806,6 +1826,28 @@ message TrustedPeer {
   // state without ever becoming a voter is dropped with it, so the
   // store does not accumulate one entry per Comb that ever asked.
   bool is_voter = 8;
+
+  // next is the STAGED certificate for this Comb: the one that is
+  // about to replace the current one, during an authorized trust
+  // transition (ADR-0170).
+  //
+  // It is a separate optional message rather than a second map entry
+  // because the store is keyed by node_id and one Comb has one
+  // identity. Two entries for one Comb would mean two trust anchors
+  // with no way to say which is current and which is staged - and
+  // "which is current" is the whole question a peer asks.
+  //
+  // While next is set, BOTH certificates are trusted: internal/peerca
+  // renders peer-ca.pem from the current entry AND the staged one, so
+  // the Comb can already serve the new certificate while its peers
+  // can already verify it. That overlap is what makes the swap safe
+  // in either order.
+  //
+  // An empty next means nothing is staged, which is the shape every
+  // entry written before ADR-0170 has. An older replica ignores this
+  // field entirely, so a staged certificate does not break a
+  // mixed-version Colony.
+  TrustedPeer next = 9;
 }
 
 // PinTrustedPeer writes one entry into the trust store, and is refused
@@ -1836,6 +1878,104 @@ message SetTrustedPeerVoter {
 //
 // Refuses a node_id that is not pinned, so "remove this" cannot be a
 // silent no-op that an operator reads as "it is gone".
+// TransitionTrustedPeer stages a new serving certificate for a Comb
+// that is ALREADY pinned, and begins a bounded overlap in which both
+// the current and the incoming certificate are trusted.
+//
+// Why this is not UnpinTrustedPeer followed by PinTrustedPeer, as the
+// proto's PinTrustedPeer comment describes a rotation: that sequence
+// has a window in which the Comb is trusted by NOBODY. peer-ca.pem is
+// derived from the store, so the unpin removes the Comb's entry
+// immediately and every peer's next handshake fails. If the pin then
+// fails for any reason, the Comb is left with no trust anchor at all
+// and the only recovery is an out-of-band backfill in which an
+// operator compares certificates by hand on every host.
+//
+// As one command, a refusal leaves the CURRENT pin exactly as it was.
+// The store is untouched, the derived file is untouched, and the Comb
+// keeps serving a certificate its peers still trust. A failed
+// rotation degrades to "the rotation did not happen", which is
+// recoverable, rather than to "this Comb is now untrusted", which is
+// an outage.
+//
+// The incoming certificate is evaluated exactly like a pin: the same
+// hostcert.Evaluate gate, the same fail-closed rules, and the same
+// re-derivation of the fingerprint and the expiry from the PEM. A
+// certificate that would be refused as a pin is refused here, with
+// the same reason.
+//
+// The authorization is the Colony's, not the certificate's. A public
+// CA validates a hostname and says nothing about whether this Comb
+// may be a member of this Colony, so a transition names the node_id it
+// applies to and is issued by an Admin of the Colony. See ADR-0170.
+message TransitionTrustedPeer {
+  // node_id is the Comb whose pinned certificate is being replaced. It
+  // must already be pinned; a transition for an unpinned node_id is
+  // refused, because creating a pin here would trust a certificate
+  // nobody compared.
+  string node_id = 1;
+
+  // next is the incoming certificate, with its fingerprint and
+  // expiry. The fingerprint and the expiry are RE-DERIVED from the
+  // PEM on every replica, exactly as applyPinTrustedPeer does, and a
+  // disagreement is refused rather than stored.
+  TrustedPeer next = 2;
+
+  // overlap_expires_at_unix is when the staged certificate stops being
+  // trusted. It is an INPUT, like the second PIN in ADR-0147 Part 2:
+  // the FSM must stay deterministic across replicas and log replays,
+  // so the wall clock is consulted once, by the manager, and only
+  // ever as this field.
+  //
+  // The overlap is bounded on purpose. An unbounded staged entry is a
+  // permanent second trust anchor, and a permanent second trust
+  // anchor is a certificate nobody knows why is still trusted.
+  int64 overlap_expires_at_unix = 3;
+
+  // reason is the operator's own account of why this certificate is
+  // being adopted, replicated with the transition for the same reason
+  // UnpinTrustedPeer records one: an incident review asking "why did
+  // this Comb's identity change" can only be answered from the log.
+  string reason = 4;
+}
+
+// ActivateTrustedPeerTransition promotes a staged certificate to
+// current, and drops the one it replaces.
+//
+// This is the second half of a transition, and it is a SEPARATE visible
+// act rather than part of the staging command, because the two
+// happen at different times and in different places: the staging
+// happens while the incoming certificate is being prepared, and the
+// activation happens once the Comb is actually serving it.
+//
+// The old certificate is dropped here, not at staging, so that the
+// overlap covers the whole period in which the Comb might be serving
+// either certificate.
+message ActivateTrustedPeerTransition {
+  string node_id = 1;
+
+  // reason is recorded with the activation for the same reason
+  // TransitionTrustedPeer records one.
+  string reason = 2;
+}
+
+// AbandonTrustedPeerTransition drops a staged certificate and keeps
+// the current one.
+//
+// It exists for the failure case. A staged certificate that turns out
+// to be wrong - the Comb could not install it, or it does not serve
+// the name the Colony expects - is dropped, and the Comb carries on
+// with the certificate its peers already trust. Without this command,
+// the only way to clear a bad staged certificate would be to activate
+// it.
+message AbandonTrustedPeerTransition {
+  string node_id = 1;
+
+  // reason is recorded with the abandonment for the same reason
+  // TransitionTrustedPeer records one.
+  string reason = 2;
+}
+
 message UnpinTrustedPeer {
   string node_id = 1;
 
