@@ -26,7 +26,7 @@ func makeCert(t *testing.T, name string) (certPEM, keyPEM string) {
 }
 
 func TestSealAndOpenDelivery_RoundTrips(t *testing.T) {
-	recipientCert, recipientKey := makeCert(t, "host2.example.com")
+	recipientCert, recipientKeyPEM := makeCert(t, "host2.example.com")
 	certPEM, keyPEM := makeCert(t, "host2.example.com")
 	fingerprint, err := CertificateFingerprint(certPEM)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestSealAndOpenDelivery_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SealDelivery: %v", err)
 	}
-	bundle, err := OpenDelivery(string(envelope), recipientCert, recipientKey, res)
+	bundle, err := OpenDelivery(string(envelope), recipientCert, recipientKeyPEM, res)
 	if err != nil {
 		t.Fatalf("OpenDelivery: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestOpenDelivery_RefusesTheWrongRecipient(t *testing.T) {
 }
 
 func TestOpenDelivery_RefusesADeliveryForAnotherReservation(t *testing.T) {
-	recipientCert, recipientKey := makeCert(t, "host2.example.com")
+	recipientCert, recipientKeyPEM := makeCert(t, "host2.example.com")
 	certPEM, keyPEM := makeCert(t, "host2.example.com")
 	fingerprint, err := CertificateFingerprint(certPEM)
 	if err != nil {
@@ -119,13 +119,13 @@ func TestOpenDelivery_RefusesADeliveryForAnotherReservation(t *testing.T) {
 	if err := other.Bind("host2", "req-1", now); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
-	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKey, other); err == nil {
+	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKeyPEM, other); err == nil {
 		t.Error("OpenDelivery accepted a delivery sealed for a different reservation")
 	}
 }
 
 func TestOpenDelivery_RefusesACertificateForTheWrongName(t *testing.T) {
-	recipientCert, recipientKey := makeCert(t, "host2.example.com")
+	recipientCert, recipientKeyPEM := makeCert(t, "host2.example.com")
 	// The certificate is for a DIFFERENT name than the reservation.
 	certPEM, keyPEM := makeCert(t, "someone-else.example.com")
 	fingerprint, err := CertificateFingerprint(certPEM)
@@ -144,13 +144,13 @@ func TestOpenDelivery_RefusesACertificateForTheWrongName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SealDelivery: %v", err)
 	}
-	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKey, res); !errors.Is(err, ErrNameMismatch) {
+	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKeyPEM, res); !errors.Is(err, ErrNameMismatch) {
 		t.Errorf("OpenDelivery for the wrong name = %v, want ErrNameMismatch", err)
 	}
 }
 
 func TestOpenDelivery_RefusesAMismatchedKeyPair(t *testing.T) {
-	recipientCert, recipientKey := makeCert(t, "host2.example.com")
+	recipientCert, recipientKeyPEM := makeCert(t, "host2.example.com")
 	certPEM, _ := makeCert(t, "host2.example.com")
 	otherCertPEM, otherKeyPEM := makeCert(t, "host2.example.com")
 	fingerprint, err := CertificateFingerprint(certPEM)
@@ -169,7 +169,7 @@ func TestOpenDelivery_RefusesAMismatchedKeyPair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SealDelivery: %v", err)
 	}
-	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKey, res); !errors.Is(err, ErrKeyMismatch) {
+	if _, err := OpenDelivery(string(envelope), recipientCert, recipientKeyPEM, res); !errors.Is(err, ErrKeyMismatch) {
 		t.Errorf("OpenDelivery with a mismatched key pair = %v, want ErrKeyMismatch", err)
 	}
 	_ = otherCertPEM

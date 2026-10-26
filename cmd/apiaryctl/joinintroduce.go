@@ -490,6 +490,45 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 			return 1
 		}
 		fmt.Println("join credentials were installed locally. managerd and frontend were restarted.")
+
+		// A PREPARED certificate, if the Colony had one for this
+		// Comb, is adopted AFTER the credentials - so that this Comb
+		// is serving a real certificate for the name it was prepared
+		// for from the moment it joins, rather than a self-signed one.
+		//
+		// The order matters: the credentials install is what makes
+		// this Comb a member, and a failed prepared install leaves a
+		// member serving its own self-signed certificate, which is a
+		// working Comb. The reverse order would leave a Comb that
+		// cannot talk to the Colony at all.
+		if len(resp.GetSealedPreparedCertificate()) > 0 {
+			result, err := installPreparedCertificate(
+				resp.GetSealedPreparedCertificate(),
+				certificates[0],
+				resp.GetPreparedCertificateReservationId(),
+				requestID,
+				resp.GetPreparedCertificateFingerprint(),
+				resp.GetPreparedCertificateFqdn(),
+				nodeConfigPath,
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: the prepared certificate was not installed: %v\n", err)
+				fmt.Fprintln(os.Stderr, "The join itself succeeded and this Comb is a member; it is serving its own certificate.")
+				return 1
+			}
+			fmt.Printf("prepared certificate installed for %s. Fingerprint %s.\n", result.FQDN, result.Fingerprint)
+			fmt.Println("managerd, frontend and restshimd were restarted so they serve it.")
+			if !result.BootstrapRetired {
+				// Say plainly what is still true, because the operator
+				// will otherwise assume the two-holder window is
+				// already closed.
+				fmt.Println()
+				fmt.Println("The bootstrap key is still in use: this Comb has not yet obtained a")
+				fmt.Println("certificate of its own. Until it does, the Comb that prepared this")
+				fmt.Println("one also holds the key. Run `apiaryctl cert-setup setup` on this")
+				fmt.Println("Comb once the Cloudflare integration has been provisioned here.")
+			}
+		}
 		return 0
 	}
 	fmt.Printf("request %s\n", requestID)

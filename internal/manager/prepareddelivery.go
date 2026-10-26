@@ -64,18 +64,18 @@ import (
 //
 // Every refusal returns an error rather than an empty envelope, so a
 // caller cannot mistake "nothing prepared" for "the delivery failed".
-func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcpb.GetJoinRequestStatusRequest, pending *internalpb.PendingJoinRequest) ([]byte, string, string, error) {
+func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcpb.GetJoinRequestStatusRequest, pending *internalpb.PendingJoinRequest) ([]byte, string, string, string, error) {
 	reservationID := strings.TrimSpace(req.GetPreparedCertificateReservationId())
 	if reservationID == "" {
 		// Nothing was presented, so there is nothing to deliver. This
 		// is the ordinary case and it is not an error.
-		return nil, "", "", nil
+		return nil, "", "", "", nil
 	}
 	if pending.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
-		return nil, "", "", fmt.Errorf("a prepared certificate is delivered only to an APPROVED join; this request is %s", pending.GetStatus().String())
+		return nil, "", "", "", fmt.Errorf("a prepared certificate is delivered only to an APPROVED join; this request is %s", pending.GetStatus().String())
 	}
 	if !statusPeerUsesTLS(ctx) {
-		return nil, "", "", fmt.Errorf("prepared certificate delivery requires a TLS connection; rerun apiaryctl join-introduce without --plaintext")
+		return nil, "", "", "", fmt.Errorf("prepared certificate delivery requires a TLS connection; rerun apiaryctl join-introduce without --plaintext")
 	}
 
 	// The joining Comb's certificate must be the one recorded for this
@@ -84,7 +84,7 @@ func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcp
 	// Colony already verified.
 	certBlock, _ := pem.Decode([]byte(req.GetRecipientTlsCertificatePem()))
 	if certBlock == nil {
-		return nil, "", "", fmt.Errorf("the recipient's certificate is missing or malformed")
+		return nil, "", "", "", fmt.Errorf("the recipient's certificate is missing or malformed")
 	}
 	fingerprint := hostcert.Fingerprint(certBlock.Bytes)
 	wantFingerprint := pending.GetTlsCertFingerprint()
@@ -92,14 +92,14 @@ func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcp
 		wantFingerprint = pending.GetAdvertisedFingerprints()[0]
 	}
 	if wantFingerprint == "" || fingerprint != wantFingerprint {
-		return nil, "", "", fmt.Errorf("recipient certificate fingerprint does not match the certificate recorded for this join request")
+		return nil, "", "", "", fmt.Errorf("recipient certificate fingerprint does not match the certificate recorded for this join request")
 	}
 
 	// The reservation must exist and must be bound to THIS request and
 	// THIS Comb.
 	reservations, err := s.raft.ListCertificateReservationsLocal(ctx)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("reading the prepared certificate reservations: %w", err)
+		return nil, "", "", "", fmt.Errorf("reading the prepared certificate reservations: %w", err)
 	}
 	var reservation *internalpb.CertificateReservation
 	for _, res := range reservations.GetReservations() {
@@ -109,29 +109,29 @@ func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcp
 		}
 	}
 	if reservation == nil {
-		return nil, "", "", fmt.Errorf("no prepared certificate reservation %q exists on this Colony", reservationID)
+		return nil, "", "", "", fmt.Errorf("no prepared certificate reservation %q exists on this Colony", reservationID)
 	}
 	if reservation.GetNodeId() == "" {
-		return nil, "", "", fmt.Errorf("the prepared certificate reservation %q is not bound to a joining Comb yet", reservationID)
+		return nil, "", "", "", fmt.Errorf("the prepared certificate reservation %q is not bound to a joining Comb yet", reservationID)
 	}
 	if reservation.GetNodeId() != pending.GetNodeId() {
-		return nil, "", "", fmt.Errorf("the prepared certificate reservation %q is bound to node %q, not to %q", reservationID, reservation.GetNodeId(), pending.GetNodeId())
+		return nil, "", "", "", fmt.Errorf("the prepared certificate reservation %q is bound to node %q, not to %q", reservationID, reservation.GetNodeId(), pending.GetNodeId())
 	}
 	if reservation.GetRequestId() != pending.GetRequestId() {
-		return nil, "", "", fmt.Errorf("the prepared certificate reservation %q is bound to join request %q, not to %q", reservationID, reservation.GetRequestId(), pending.GetRequestId())
+		return nil, "", "", "", fmt.Errorf("the prepared certificate reservation %q is bound to join request %q, not to %q", reservationID, reservation.GetRequestId(), pending.GetRequestId())
 	}
 	if reservation.GetDeliveredAtUnix() != 0 {
-		return nil, "", "", fmt.Errorf("the prepared certificate reservation %q has already been delivered; the prepared pair is single-use", reservationID)
+		return nil, "", "", "", fmt.Errorf("the prepared certificate reservation %q has already been delivered; the prepared pair is single-use", reservationID)
 	}
 	if raft.CertificateReservationExpired(reservation, time.Now().UTC().Unix()) {
-		return nil, "", "", fmt.Errorf("the prepared certificate reservation %q expired at %d", reservationID, reservation.GetExpiresAtUnix())
+		return nil, "", "", "", fmt.Errorf("the prepared certificate reservation %q expired at %d", reservationID, reservation.GetExpiresAtUnix())
 	}
 
 	// The prepared pair is read from this Comb's own protected store.
 	// It is never in replicated state, and it is never in the request.
 	certPEM, keyPEM, err := s.readPreparedPair(reservation)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 
 	// The envelope's associated data binds it to the reservation, the
@@ -150,13 +150,18 @@ func (s *Server) sealPreparedCertificateForJoiner(ctx context.Context, req *rpcp
 		pending.GetRequestId(),
 		pending.GetNodeId(),
 		req.GetRecipientTlsCertificatePem(),
+		// The BOOTSTRAP key is the one in the bundle: it is the key of
+		// the prepared certificate, and it is the key the joiner
+		// installs. The seal itself needs only the recipient's
+		// CERTIFICATE - the recipient's private key never leaves the
+		// joiner.
 		keyPEM,
 		time.Now().UTC(),
 	)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("sealing the prepared certificate: %w", err)
+		return nil, "", "", "", fmt.Errorf("sealing the prepared certificate: %w", err)
 	}
-	return envelope, reservationID, reservation.GetFingerprint(), nil
+	return envelope, reservationID, reservation.GetFingerprint(), reservation.GetFqdn(), nil
 }
 
 // readPreparedPair reads the prepared certificate and its bootstrap key

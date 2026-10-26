@@ -705,7 +705,7 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		//
 		// A joiner that presented no reservation gets nothing here,
 		// and that is NOT an error: most joins have no preparation.
-		prepared, reservationID, _, prepErr := s.sealPreparedCertificateForJoiner(ctx, req, pending)
+		prepared, reservationID, preparedFingerprint, preparedFQDN, prepErr := s.sealPreparedCertificateForJoiner(ctx, req, pending)
 		if prepErr != nil {
 			out.Error = prepErr.Error()
 			return out, nil
@@ -713,6 +713,8 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		if len(prepared) > 0 {
 			out.SealedPreparedCertificate = prepared
 			out.PreparedCertificateReservationId = reservationID
+			out.PreparedCertificateFingerprint = preparedFingerprint
+			out.PreparedCertificateFqdn = preparedFQDN
 			// The reservation is marked delivered AFTER the envelope
 			// exists, so a failed mark never destroys what the joiner
 			// needs. A second collection is refused by the FSM.

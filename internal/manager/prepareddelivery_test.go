@@ -61,7 +61,7 @@ func TestPreparedDelivery_NothingPresentedIsNotAnError(t *testing.T) {
 		NodeId:    "node02",
 		Status:    internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED,
 	}
-	envelope, reservationID, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{}, pending)
+	envelope, reservationID, _, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{}, pending)
 	if err != nil {
 		t.Fatalf("an ordinary join was refused: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestPreparedDelivery_RefusesAnUnapprovedRequest(t *testing.T) {
 		NodeId:    "node02",
 		Status:    internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
 	}
-	_, _, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
+	_, _, _, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
 		PreparedCertificateReservationId: "res-1",
 		RecipientTlsCertificatePem:       certPEM,
 	}, pending)
@@ -109,7 +109,7 @@ func TestPreparedDelivery_RefusesAPlaintextConnection(t *testing.T) {
 		NodeId:    "node02",
 		Status:    internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED,
 	}
-	_, _, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
+	_, _, _, _, err := srv.sealPreparedCertificateForJoiner(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
 		PreparedCertificateReservationId: "res-1",
 		RecipientTlsCertificatePem:       certPEM,
 	}, pending)
@@ -141,7 +141,7 @@ func TestPreparedDelivery_RefusesAMismatchedRecipient(t *testing.T) {
 		TlsCertFingerprint: "SHA256:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
 	}
 	tlsCtx := peer.NewContext(context.Background(), &peer.Peer{AuthInfo: credentials.TLSInfo{}})
-	_, _, _, err := srv.sealPreparedCertificateForJoiner(tlsCtx, &rpcpb.GetJoinRequestStatusRequest{
+	_, _, _, _, err := srv.sealPreparedCertificateForJoiner(tlsCtx, &rpcpb.GetJoinRequestStatusRequest{
 		PreparedCertificateReservationId: "res-1",
 		RecipientTlsCertificatePem:       certPEM,
 	}, pending)
