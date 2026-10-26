@@ -12,16 +12,19 @@ import (
 	"fmt"
 	"os"
 
-	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 // readSecret reads a line from the terminal without echoing it.
 //
-// It uses the termios ioctl directly rather than shelling out to
-// stty, because a hand-rolled stty dance is the version that
+// It uses golang.org/x/term rather than a hand-rolled termios ioctl
+// dance, for two reasons. The hand-rolled version is the one that
 // silently fails to disable echo on some terminals - and a secret read
 // that echoes is worse than no secret read at all, because the
-// operator believes it was hidden.
+// operator believes it was hidden. And the ioctl constants are
+// platform-specific: FreeBSD's TIOCGETA is Linux's TCGETS, so a
+// hand-rolled version does not build everywhere, and the walkthrough
+// is built on more than one platform.
 //
 // The terminal is restored to its previous state on every path out,
 // including an error, so a failed read does not leave the operator's
@@ -32,20 +35,17 @@ import (
 // instead, and the token in that file is not on the screen either.
 func readSecret(f *os.File) (string, error) {
 	fd := int(f.Fd())
-	previous, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
-	if err != nil {
+	if !term.IsTerminal(fd) {
 		return "", fmt.Errorf("the terminal is not interactive, so the value cannot be read without echoing it. Use --token-file instead")
 	}
-	noEcho := *previous
-	noEcho.Lflag &^= unix.ECHO
-	noEcho.Lflag |= unix.ICANON | unix.ISIG
-	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &noEcho); err != nil {
+	previous, err := term.MakeRaw(fd)
+	if err != nil {
 		return "", fmt.Errorf("putting the terminal into no-echo mode: %w. Use --token-file instead", err)
 	}
 	restored := false
 	restore := func() {
 		if !restored {
-			_ = unix.IoctlSetTermios(fd, unix.TIOCSETA, previous)
+			_ = term.Restore(fd, previous)
 			restored = true
 		}
 	}
