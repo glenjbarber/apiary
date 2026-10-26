@@ -263,8 +263,16 @@ serving certificate is what its peers pin.
 ### The everyday case
 
 The certificate is issued automatically at install time and renewed
-without a restart. The **Certificates** page shows what each Comb
-holds and how long it has left. You do not normally need to touch it.
+without a restart — the services re-read it on the next TLS handshake,
+so a renewal never drops your session. The **Certificates** page shows
+what each Comb holds and how long it has left. You do not normally
+need to touch it.
+
+A renewal is triggered by the certificate's **own expiry**, not by a
+fixed schedule, so a short-lived certificate and a long-lived one are
+both handled without configuration. If a renewal fails, the current
+certificate keeps serving and the failure is reported — an outage at
+the CA does not take your Comb offline.
 
 ### Public certificates from Cloudflare
 
@@ -293,7 +301,27 @@ Comb reuses it - no credential re-entry:
 ```
 
 That prints a **reservation ID**, which the joining Comb presents when
-it collects the certificate during the join.
+it collects the certificate during the join:
+
+```sh
+/usr/local/libexec/apiary/apiaryctl join-introduce \
+    --request-id jreq-XXXX --first-code 123456 \
+    --target leader.example.com:17700 --install-credentials \
+    --reservation-id 7Qk2...Vi
+```
+
+A Comb that was prepared for is also given the **Cloudflare
+integration** — the token, the zone and the naming suffix — so it can
+obtain and renew certificates of its own. A Comb that was *not*
+prepared for gets no credential at all: a zone-scoped token can change
+what every host in that zone resolves to, and handing one to every
+Comb would make a single compromised Comb a way to redirect the whole
+zone.
+
+**The token is shared.** The preparing Comb and the joining Comb both
+hold it, which is the cost of this design. Keep it as narrow as
+Cloudflare allows — a zone-scoped token with only DNS edit — and
+rotate it when a Comb leaves the Colony.
 
 ### Rotating a certificate
 
