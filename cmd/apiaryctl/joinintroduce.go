@@ -208,6 +208,7 @@ func runJoinIntroduce(args []string) int {
 		plaintext          bool
 		caFile             string
 		installCredentials bool
+		reservationID      string
 	)
 	fs.StringVar(&target, "target", "", "host:port of ANY member of the Colony being joined, not only its leader (required to start a request)")
 	fs.StringVar(&requestID, "request-id", "", "poll an existing request for its second PIN instead of starting a new one")
@@ -216,6 +217,7 @@ func runJoinIntroduce(args []string) int {
 	fs.StringVar(&nodeID, "node-id", "", "this Comb's raft identity; defaults to its own configured node_id")
 	fs.StringVar(&raftBind, "raft-bind", "", "this Comb's raft bind address; defaults to its own configured raft bind")
 	fs.StringVar(&nodeConfigArg, "node-config", "", "path to managerd.json; defaults to "+nodeconfig.DefaultPath)
+	fs.StringVar(&reservationID, "reservation-id", "", "the prepared-certificate reservation to collect during this join; printed by `apiaryctl cert-setup prepare` on the preparing Comb")
 	fs.BoolVar(&plaintext, "plaintext", false, "dial --target without TLS, for a Colony whose members do not serve TLS; the default dials with TLS, trusting the system CA pool")
 	fs.StringVar(&caFile, "ca-file", "", "trust this CA file instead of the system pool when dialing --target with TLS; ignored with --plaintext")
 	fs.BoolVar(&installCredentials, "install-credentials", false, "after approval, decrypt and install this Comb's per-node API key and Colony restart-guardrail token (root only; TLS required)")
@@ -240,6 +242,13 @@ that transcription is the check.
   --request-id ID      poll that request instead of starting a new one
   --first-code CODE    the first code, required with --request-id
   --install-credentials after approval, install credentials on THIS Comb
+  --reservation-id ID
+                         the prepared-certificate reservation to collect
+                         during this join. The preparing Comb printed it
+                         when it ran "apiaryctl cert-setup prepare". The
+                         id says WHICH preparation is being collected;
+                         the seal addressed to this Comb's certificate
+                         is what authorizes the collection
   --plaintext          dial --target without TLS (only for a Colony that
                         does not serve TLS); default dials with TLS
   --ca-file FILE       trust this CA instead of the system pool; ignored
@@ -266,7 +275,7 @@ so --field fingerprints prints digests and nothing else.
 			fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --install-credentials cannot be combined with --field")
 			return 2
 		}
-		return pollJoinIntroduction(target, requestID, firstCode, field, plaintext, caFile, nodeConfigArg, installCredentials)
+		return pollJoinIntroduction(target, requestID, firstCode, field, plaintext, caFile, nodeConfigArg, installCredentials, reservationID)
 	}
 	return startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg, plaintext, caFile)
 }
@@ -438,7 +447,7 @@ func buildJoinStatusRequest(requestID, firstCode string, certificatePEM ...strin
 // target after acceptance and the operator already has it - this
 // command cannot recover it, and saying so is more useful than printing
 // an empty field.
-func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile, nodeConfigPath string, installCredentials bool) int {
+func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile, nodeConfigPath string, installCredentials bool, reservationID string) int {
 	if firstCode == "" {
 		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `/usr/local/libexec/apiary/apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
 		return 2
@@ -460,7 +469,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 		return 1
 	}
 	defer closeFn()
-	resp, err := client.GetJoinRequestStatus(ctx, buildJoinStatusRequest(requestID, firstCode, certificates[0].pem))
+	resp, err := client.GetJoinRequestStatus(ctx, buildJoinStatusRequest(requestID, firstCode, certificates[0].pem, reservationID))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
