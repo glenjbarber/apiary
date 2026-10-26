@@ -218,6 +218,13 @@ func (s *Server) renderHostPkgPage(w http.ResponseWriter, r *http.Request, data 
 	pd.ActivePage = "host_packages"
 	data.pageData = pd
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The same no-store the shared render helper sets. This path
+	// renders its own template rather than going through it, so the
+	// header has to be set here too - a page that skips it is a page
+	// a browser may cache.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	if err := s.tmpl.ExecuteTemplate(w, "hostpkg_packages_page", data); err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 	}
