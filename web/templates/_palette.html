@@ -1,0 +1,22 @@
+{{/*
+  The command palette's result list (handoff section 11).
+
+  This is a FRAGMENT, swapped into #palette-results by htmx from
+  GET /palette?q=.
+
+  The Actions group is server-rendered and role-filtered: a Viewer
+  session's response contains no mutating action at all, because the
+  palette is a way to START something and an action the session may not
+  perform must not be offered.
+*/}}
+{{define "palette_results"}}
+{{if .Palette.Actions}}
+<div class="palette-group">Actions</div>
+{{range .Palette.Actions}}<a href="{{.Href}}"><span>{{.Label}}</span><span>{{.Detail}}</span></a>{{end}}
+{{end}}
+{{if .Palette.Results}}
+<div class="palette-group">Go to</div>
+{{range .Palette.Results}}<a href="{{.Href}}"><span>{{.Label}}</span><span>{{.Detail}}</span></a>{{end}}
+{{end}}
+{{if .Palette.Empty}}<div class="palette-empty">Nothing matches "{{.PaletteQuery}}".</div>{{end}}
+{{end}}

@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +106,35 @@ type clusterNodeView struct {
 	MemUsedPct float64
 	PoolsOK    bool
 	PFEnabled  bool
+
+	// ZFSKnown/ZFSPct/ZFSPool carry the Comb's worst ZFS pool's
+	// capacity. ZFSKnown is false when the Comb reports no pool at
+	// all, so "no pool" is never rendered as "0% used".
+	ZFSKnown bool
+	ZFSPct   int
+	ZFSPool  string
+
+	// Suffrage is the Comb's raft membership, read from the anchor
+	// Status response's own member list. It is MEMBERSHIP, not a
+	// health verdict, and it is empty when it was not observed.
+	Suffrage string
+
+	// ObservationsAreItsOwn says whether the host statistics this row
+	// carries were ACTUALLY this Comb's.
+	//
+	// It is false when fetchHostStats fell back to this frontend's
+	// own colocated managerd for a Comb that is not this frontend's
+	// own Comb - which is what happens when peer forwarding is not
+	// configured. The answer is then this Comb's data wearing
+	// another Comb's name, and a caller that renders a reading from
+	// it is showing this Comb's CPU and memory on another Comb's
+	// row.
+	//
+	// The health machinery already refuses to treat such an answer
+	// as evidence (see observedHostStats in clusterNodeEvidence);
+	// this flag lets the overview's METERS refuse it too, without
+	// changing what the Colony update page does with its own rows.
+	ObservationsAreItsOwn bool
 
 	// CPUGauge/MemGauge (docs/web-ui-redesign.md Section C) render the
 	// same LoadAvg1/MemUsedPct above as a radial reading on the Command
@@ -360,6 +388,22 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 			break
 		}
 	}
+	// The ZFS reading is the WORST pool's capacity, not an average: an
+	// average of a 10%-full and a 99%-full pool reads as a comfortable
+	// 55%, which is exactly the "easy to see what is wrong" failure the
+	// Blend overview is against.
+	//
+	// ZFSKnown is false when this Comb has NO pools at all, which is a
+	// different fact from a pool that is empty - so the reading is
+	// explicitly unknown rather than 0%.
+	zfsPct := uint32(0)
+	zfsPool := ""
+	for _, p := range stats.Pools {
+		if p.CapacityPct > zfsPct || zfsPool == "" {
+			zfsPct = p.CapacityPct
+			zfsPool = p.Name
+		}
+	}
 	return clusterNodeView{
 		NodeID:     nodeID,
 		Reachable:  true,
@@ -367,6 +411,9 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 		MemUsedPct: stats.MemUsedPct,
 		PoolsOK:    poolsOK,
 		PFEnabled:  stats.PF.Enabled,
+		ZFSKnown:   len(stats.Pools) > 0,
+		ZFSPct:     int(zfsPct),
+		ZFSPool:    zfsPool,
 		// "CPU %" rather than "CPU": this gauge draws the load average
 		// as a percentage of the node's core count, which is what the
 		// dial's filled arc and its accessible name already report.
@@ -377,8 +424,28 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 		// "Memory %" rather than "Memory": this gauge reads a percentage,
 		// and two adjacent bare labels gave no hint which number was a
 		// percentage. The unit belongs in the label.
-		MemGauge: gaugeFromPercent("Memory %", stats.MemUsedPct, stats.MemFree+" free"),
+		// The memory gauge is built from the used/total PAIR, not
+		// from the percentage alone.
+		//
+		// gaugeFromPercent cannot tell a real 0% from an unread
+		// total: both arrive as the number 0. A HostStats response
+		// with no memory figures at all would therefore render as
+		// "0% used" - a claim that the Comb has no memory in use,
+		// which is a different fact from "this Comb's memory could
+		// not be read". gaugeFromUsedTotal already draws that
+		// distinction correctly (a zero total is unknown, never
+		// 0%), so the pair is passed through it.
+		MemGauge: gaugeFromUsedTotal("Memory %", memUsedBytes(stats), stats.MemTotalBytes, stats.MemFree+" free"),
 	}
+}
+
+// memUsedBytes returns the bytes of physical memory in use, or 0 when
+// the total is 0 (which gaugeFromUsedTotal reads as "no reading").
+func memUsedBytes(stats statsView) uint64 {
+	if stats.MemTotalBytes == 0 {
+		return 0
+	}
+	return stats.MemTotalBytes - stats.MemFreeBytes
 }
 
 // nodeHealthSignals gathers Evidence-Aware Health's (ADR-0056) raw
@@ -514,6 +581,7 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 		stats = fromRPCStats(hostStats)
 	}
 	node := summarizeClusterNode(nodeID, stats, errMsg)
+	node.ObservationsAreItsOwn = observedHostStats != nil
 	if observedHostStats != nil && observedHostStats.GetLastReconcileSuccessUnix() > 0 {
 		node.ReconcileSuccessUnix = observedHostStats.GetLastReconcileSuccessUnix()
 	}
@@ -529,6 +597,17 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	// every row already shares, so it costs no extra RPC.
 	leader := colonyLeaderFromStatus(anchor, nil, now)
 	node.IsColonyLeader = leader.IsLeaderNode(nodeID)
+	// The Comb's raft membership, from the anchor's own member list.
+	// Empty when it was not observed - a Comb whose suffrage could
+	// not be read is never shown as a Voter.
+	if anchor != nil {
+		for _, member := range anchor.GetMembers() {
+			if member.GetNodeId() == nodeID {
+				node.Suffrage = member.GetSuffrage()
+				break
+			}
+		}
+	}
 	var causeStale bool
 	node.Causes, node.CauseState, node.CauseHeadline, causeStale = combCauses(nodeID, localNodeID, anchor, observedHostStats, hostStatsErr, result.Observations, index, now)
 	node.CauseBadgeClass, node.CauseBadgeLabel = combCauseBadge(node.CauseState, causeStale)
@@ -550,99 +629,6 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	node.DigestBadgeLabel = digestView.Label
 	node.DigestDetail = digestView.Detail
 	return node
-}
-
-// handleClusterOverviewPage serves the default landing page ("/"): a
-// basic-status row per known cluster node, fetched concurrently since
-// one unreachable node shouldn't hold up every other node's row. Each
-// row also carries an Evidence-Aware Health (ADR-0056) verdict computed
-// from the same fetch, rather than trusting the basic Reachable/Error
-// fields alone.
-func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Request) {
-	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
-	if err != nil {
-		s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{Error: err.Error(), ActivePage: "stats"}, nil, err))
-		return
-	}
-
-	localNodeID := statusResp.GetManagerNodeId()
-	nodeIDs := statusResp.GetKnownNodeIds()
-	if len(nodeIDs) == 0 && localNodeID != "" {
-		nodeIDs = []string{localNodeID}
-	}
-
-	// One shared, fail-soft read of the cluster-wide resource lists feeds
-	// every row's cause panel below. Fetching per Comb instead would cost
-	// two extra leader-forwarded Raft reads per node and could show two
-	// Combs contradictory "affected resource" lists from two different
-	// moments in the same page load.
-	now := time.Now()
-	index := s.gatherCombCauseIndex(r.Context())
-
-	nodes := make([]clusterNodeView, len(nodeIDs))
-	var wg sync.WaitGroup
-	for i, id := range nodeIDs {
-		wg.Add(1)
-		go func(i int, id string) {
-			defer wg.Done()
-			nodes[i] = s.clusterNodeEvidence(r.Context(), id, localNodeID, statusResp, index, now)
-		}(i, id)
-	}
-	wg.Wait()
-
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
-
-	// The digest verdict is the one thing on this page that cannot be
-	// decided per row: "these state machines agree" is a fact about the
-	// whole set. It is computed once here, from the digests the rows above
-	// already gathered, and stamped back onto them.
-	observations := make([]statedigest.Observation, len(nodes))
-	for i, node := range nodes {
-		observations[i] = statedigest.Observation{
-			NodeID: node.NodeID, Digest: node.StateDigest, AppliedIndex: node.AppliedIndex,
-		}
-	}
-	digestViews, digestColony := stateDigestVerdicts(observations)
-	for i := range nodes {
-		view, found := digestViews[nodes[i].NodeID]
-		if !found {
-			// Unreachable while both are built from the same rows, but an
-			// absent verdict must render as unobserved rather than as a
-			// blank badge if that ever stops holding.
-			view = stateDigestUnobservedView(statedigest.Observation{NodeID: nodes[i].NodeID}, len(nodes))
-		}
-		nodes[i].DigestState = view.State
-		nodes[i].DigestBadgeClass = view.BadgeClass
-		nodes[i].DigestBadgeLabel = view.Label
-		nodes[i].DigestDetail = view.Detail
-	}
-
-	joinRequests := s.currentJoinRequests(r)
-	joinRequestError := r.URL.Query().Get("join_request_error")
-	joinRequestErrorStage1Anchor := ""
-	if joinRequestErrorPointsToStage1(joinRequestError) {
-		if requestID := r.URL.Query().Get("join_request_stage1_request_id"); requestID != "" {
-			joinRequestErrorStage1Anchor = "join-request-" + requestID + "-stage1"
-		}
-	}
-	joinRequestAwaitingSecond := r.URL.Query().Get("join_request_awaiting_second")
-	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
-		ClusterNodes: nodes,
-		// GuardrailHolds is 0 - see pageData.HealthCard's own comment on
-		// why this constructor has no real count to pass here yet.
-		HealthCard:                             newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
-		StateDigestColony:                      digestColony,
-		JoinRequests:                           joinRequests,
-		ActivePage:                             "stats",
-		JoinRequestError:                       joinRequestError,
-		JoinRequestErrorPointsToStage1:         joinRequestErrorPointsToStage1(joinRequestError),
-		JoinRequestErrorStage1Anchor:           joinRequestErrorStage1Anchor,
-		JoinRequestAwaitingSecondAuthorization: joinRequestAwaitingSecond != "",
-		JoinRequestAwaitingSecondAuthorizationMessage: joinRequestAwaitingSecond,
-		JoinRequestPreflightID:                        r.URL.Query().Get("preflight_request_id"),
-		JoinRequestPreflightVerdict:                   r.URL.Query().Get("preflight_verdict"),
-		JoinRequestPreflightDetail:                    r.URL.Query().Get("preflight_detail"),
-	}, statusResp, nil))
 }
 
 // handleClusterEvidencePage serves the evidence-backed health details for
@@ -688,7 +674,7 @@ func (s *Server) handleHostPage(w http.ResponseWriter, r *http.Request) {
 	if stats.NodeID == "" {
 		stats.NodeID = id
 	}
-	s.render(w, "host_page", s.withAuthFieldsFrom(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}, statusResp, nil))
+	s.render(w, "host_page", s.withAuthFieldsFrom(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats", ActiveNodeID: id}, statusResp, nil))
 }
 
 // knownColonyMember reports whether id is in the current raft membership

@@ -1379,17 +1379,20 @@ func TestClusterOverviewTopologyListWrapperSurvives(t *testing.T) {
 	}
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `<div class="cockpit-topology-list">`) {
-		t.Error("the cockpit-topology-list wrapper is missing from the command center; its Comb cards lost their grid layout")
+	// The Blend overview replaced the Command Center's topology cards
+	// with the Combs section, whose wrapper is .ov-table-scroll and
+	// whose rows are .ov-table-name. The same property is guarded: the
+	// wrapper is present, and it holds one row per known Comb.
+	if !strings.Contains(body, `<div class="ov-table-scroll">`) {
+		t.Error("the Combs table wrapper is missing from the overview; its Comb rows lost their layout")
 	}
-	if got := strings.Count(body, `class="cockpit-topology-node`); got != len(updateTestCombs()) {
-		t.Errorf("rendered %d topology cards, want %d - one per known Comb", got, len(updateTestCombs()))
+	if got := strings.Count(body, `class="ov-table-name"`); got != len(updateTestCombs()) {
+		t.Errorf("rendered %d Comb rows, want %d - one per known Comb", got, len(updateTestCombs()))
 	}
-	// And the panel head that carries the colony digest badge is still
-	// inside the same section, so a refactor that moved one out of the
-	// other would be caught here too.
-	if !strings.Contains(body, `<section class="panel cockpit-topology">`) {
-		t.Error("the topology panel section is missing")
+	// And the colony digest badge is still on the page, so a refactor
+	// that dropped it would be caught here too.
+	if !strings.Contains(body, "FSM state agreement (ADR-0143)") {
+		t.Error("the colony-wide FSM state agreement verdict is missing from the overview")
 	}
 }
 

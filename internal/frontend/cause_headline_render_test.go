@@ -50,43 +50,46 @@ import (
 // a document-wide search would match the wrong text.
 func nodeCauseLine(t *testing.T, body, nodeID string) string {
 	t.Helper()
-	const card = `class="cockpit-topology-node`
-	cardHTML := ""
+	// The Blend overview replaced the old Command Center's topology
+	// cards with the Combs table, so the cause line now lives on a
+	// Comb's ROW rather than on a card. The row is scoped the same way
+	// the card was: by the Comb's own link, so a document-wide search
+	// cannot match another Comb's line.
+	const row = `class="ov-table-name"`
+	rowHTML := ""
 	for at := 0; ; {
-		i := strings.Index(body[at:], card)
+		i := strings.Index(body[at:], row)
 		if i < 0 {
-			t.Fatalf("no topology card for %q in the rendered page", nodeID)
+			t.Fatalf("no Combs row for %q in the rendered page", nodeID)
 		}
 		i += at
-		at = i + len(card)
-		// The card ends where the next one begins. The cause line is the
-		// last child div, so a slice to the next card is enough and does
-		// not depend on the markup's div nesting.
+		at = i + len(row)
+		// The row ends where the next one begins.
 		end := len(body)
-		if j := strings.Index(body[at:], card); j >= 0 {
+		if j := strings.Index(body[at:], row); j >= 0 {
 			end = at + j
 		}
 		if segment := body[i:end]; strings.Contains(segment, `href="/host/`+nodeID+`"`) {
-			cardHTML = segment
+			rowHTML = segment
 			break
 		}
 	}
-	const cause = `class="cockpit-node-cause"`
-	c := strings.Index(cardHTML, cause)
+	const cause = `class="ov-cause"`
+	c := strings.Index(rowHTML, cause)
 	if c < 0 {
-		t.Fatalf("card for %q has no cause line: %s", nodeID, cardHTML)
+		t.Fatalf("row for %q has no cause line: %s", nodeID, rowHTML)
 	}
 	c += len(cause)
 	// Step past the rest of the opening tag, so the data-cause-state
 	// attribute value is not read as prose.
-	if g := strings.Index(cardHTML[c:], ">"); g >= 0 {
+	if g := strings.Index(rowHTML[c:], ">"); g >= 0 {
 		c += g + 1
 	}
-	e := strings.Index(cardHTML[c:], "</div>")
+	e := strings.Index(rowHTML[c:], "</div>")
 	if e < 0 {
-		t.Fatalf("cause line for %q is not terminated by </div>: %s", nodeID, cardHTML)
+		t.Fatalf("cause line for %q is not terminated by </div>: %s", nodeID, rowHTML)
 	}
-	return strings.Join(strings.Fields(stripTags(cardHTML[c:c+e])), " ")
+	return strings.Join(strings.Fields(stripTags(rowHTML[c:c+e])), " ")
 }
 
 // stripTags removes HTML tags from a rendered fragment and decodes the
@@ -169,14 +172,24 @@ func TestNodeStatusCauseLine_SpeaksItsVerdictOnce(t *testing.T) {
 	}
 	body := rec.Body.String()
 
-	// The badge row must keep every one of its own separate signals. The
-	// digest verdict in particular is a DIFFERENT fact from the cause
-	// verdict, and de-duplicating the cause line is not a licence to drop
-	// it.
-	for _, want := range []string{"Reachable", "healthy", "State matches"} {
+	// The Comb's row must keep every one of its own separate signals.
+	// The digest verdict in particular is a DIFFERENT fact from the
+	// cause verdict, and de-duplicating the cause line is not a
+	// licence to drop it.
+	//
+	// "Reachable" is the old Command Center's badge wording. The Blend
+	// overview states the same fact in the seven-state vocabulary: a
+	// Comb that answered carries the "ok" dot, and one that did not
+	// carries the "unknown" one. The check below is that.
+	for _, want := range []string{"State matches"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("badge row lost %q, so this test is not exercising the reported page: %s", want, colonyExcerpt(body))
+			t.Fatalf("the Comb's row lost %q, so this test is not exercising the reported page: %s", want, colonyExcerpt(body))
 		}
+	}
+	// The Comb is observed and good, so its state dot is the "ok" one
+	// and it is NOT rendered as unknown.
+	if !strings.Contains(body, `class="dot ok"`) {
+		t.Fatalf("the Comb's row does not carry its observed-and-good state: %s", colonyExcerpt(body))
 	}
 
 	got := nodeCauseLine(t, body, node)

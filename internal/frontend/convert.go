@@ -1008,6 +1008,15 @@ type statsView struct {
 	MemFree    string
 	MemUsedPct float64
 
+	// MemTotalBytes/MemFreeBytes are the same pair as MemTotal and
+	// MemFree, in bytes rather than formatted. They exist so a
+	// caller can tell a REAL zero from an unreadable total - the
+	// formatted strings cannot, because "0 B" is what an unread
+	// reading formats to as well as what an empty machine formats
+	// to.
+	MemTotalBytes uint64
+	MemFreeBytes  uint64
+
 	Pools []poolView
 	Disks []diskView
 	Net   []netIfaceView
@@ -1098,17 +1107,19 @@ func fromRPCStats(resp *rpcpb.HostStatsResponse) statsView {
 	pf := resp.GetPf()
 
 	return statsView{
-		NodeID:     resp.GetNodeId(),
-		Cores:      cpu.GetCores(),
-		LoadAvg1:   cpu.GetLoadAvg_1(),
-		LoadAvg5:   cpu.GetLoadAvg_5(),
-		LoadAvg15:  cpu.GetLoadAvg_15(),
-		MemTotal:   formatBytes(mem.GetTotalBytes()),
-		MemFree:    formatBytes(mem.GetFreeBytes()),
-		MemUsedPct: usedPct,
-		Pools:      pools,
-		Disks:      disks,
-		Net:        net,
+		NodeID:        resp.GetNodeId(),
+		Cores:         cpu.GetCores(),
+		LoadAvg1:      cpu.GetLoadAvg_1(),
+		LoadAvg5:      cpu.GetLoadAvg_5(),
+		LoadAvg15:     cpu.GetLoadAvg_15(),
+		MemTotal:      formatBytes(mem.GetTotalBytes()),
+		MemFree:       formatBytes(mem.GetFreeBytes()),
+		MemTotalBytes: mem.GetTotalBytes(),
+		MemFreeBytes:  mem.GetFreeBytes(),
+		MemUsedPct:    usedPct,
+		Pools:         pools,
+		Disks:         disks,
+		Net:           net,
 		PF: pfView{
 			Enabled: pf.GetEnabled(), CurrentStates: pf.GetCurrentStates(), Matches: pf.GetMatches(),
 		},

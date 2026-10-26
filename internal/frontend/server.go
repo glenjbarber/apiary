@@ -55,6 +55,11 @@ type pageData struct {
 	// Empty for fragment renders, which don't include the nav.
 	ActivePage string
 
+	// ActiveNodeID names the Comb whose own page is open, so the
+	// Combs section's per-Comb tab strip can mark the right one
+	// active. Empty on every other page.
+	ActiveNodeID string
+
 	// KnownCombs lists known raft cluster member IDs for the sidebar's
 	// Colony tree (docs/web-ui-redesign.md Section 1's CombTree),
 	// letting each one link straight to its own "/host/{id}" evidence
@@ -149,6 +154,35 @@ type pageData struct {
 	// ClusterNodes is the basic per-node summary row list for the
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
+
+	// Overview is the Blend landing page's gathered view model
+	// (handoff section 7): the status line, the health chip, the
+	// "Needs attention" list, and the Combs section in all three
+	// views. It is gathered ONCE per request and shared by the full
+	// page and by every refreshing fragment, so the three surfaces
+	// can never disagree with each other.
+	Overview overviewBundle
+
+	// CombView is the selected Comb view: "table", "cards", or
+	// "matrix". The server reads it from the request on every render
+	// of "/", so the right view appears on first paint with no flash.
+	CombView string
+
+	// ReplicaPage is the Storage > Replication page's data
+	// (handoff section 6) - a read-only, colony-wide view of every
+	// replica-backed resource's HAST freshness.
+	ReplicaPage replicaPageView
+
+	// Palette is the command palette's result list (handoff section
+	// 11), and PaletteQuery is what the operator typed.
+	Palette      paletteView
+	PaletteQuery string
+
+	// Nav is the rail and tab strip (handoff section 6). It is
+	// computed per render from the navigation table and the current
+	// page, so the rail's active item and the tab strip's active tab
+	// are always the same page's.
+	Nav []railSectionView
 
 	// TopologyMap is the read-only network map, projected from the same
 	// network, VM, jail, and membership reads used by their existing pages.
@@ -930,12 +964,27 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"isoMissingByNode":         isoMissingByNode,
 		"cloneSourceSnapshotsJSON": cloneSourceSnapshotsJSON,
 		"machineSections":          func() []machineSection { return machineSections },
-		"hostOnly":                 hostOnly,
-		"placementUnavailable":     placementUnavailable,
-		"placementUnavailableFor":  placementUnavailableFor,
-		"hostPackagesLink":         hostPackagesLink,
-		"deadlineLocal":            deadlineLocal,
-		"remainingText":            remainingText,
+		// combViewNames is the ordered list of the Combs section's
+		// three views, for the segmented control. The names are the
+		// cookie's values, so there is one spelling of each.
+		"combViewNames": func() []string { return combViews },
+		// combViewLabel is the segmented control's button text.
+		"combViewLabel": func(name string) string { return combViewLabel[name] },
+		// statusLegend is the matrix's legend: all seven states,
+		// each with its label.
+		"statusLegend": func() []statusLegendEntry {
+			out := make([]statusLegendEntry, 0, len(statusOrder))
+			for _, state := range statusOrder {
+				out = append(out, statusLegendEntry{State: state, Label: statusLabel[state]})
+			}
+			return out
+		},
+		"hostOnly":                hostOnly,
+		"placementUnavailable":    placementUnavailable,
+		"placementUnavailableFor": placementUnavailableFor,
+		"hostPackagesLink":        hostPackagesLink,
+		"deadlineLocal":           deadlineLocal,
+		"remainingText":           remainingText,
 		// replicaOptions renders the replica-node picker with the
 		// chosen owner excluded. The rule lives in Go
 		// (replicaNodeOptions), so the browser never mirrors it.
@@ -1078,8 +1127,9 @@ func (s *Server) withAuthFieldsFrom(r *http.Request, pd pageData, status *rpcpb.
 		status, statusErr = s.client.Status(ctx, &rpcpb.StatusRequest{})
 	}
 	pd.ColonyLeader = colonyLeaderFromStatus(status, statusErr, time.Now())
+	combs := []string{}
 	if status != nil {
-		combs := append([]string(nil), status.GetKnownNodeIds()...)
+		combs = append([]string(nil), status.GetKnownNodeIds()...)
 		sort.Strings(combs)
 		pd.KnownCombs = combs
 		// The tree is gathered from the SAME status the page render
@@ -1087,6 +1137,17 @@ func (s *Server) withAuthFieldsFrom(r *http.Request, pd pageData, status *rpcpb.
 		// lists are one read each, shared across every Comb.
 		pd.CombTree = s.gatherCombTree(r.Context(), status)
 	}
+	// The rail and tab strip (handoff section 6). It is built here
+	// because this is the ONE place every full-page render passes
+	// through - so every page gets the new chrome without each
+	// handler having to remember it.
+	//
+	// The rail's amber dots are NOT computed here: they come from the
+	// overview's gathered health evidence, which only the overview
+	// page has. A page that is not the overview shows no dots rather
+	// than a second, disagreeing health gather - the same reasoning
+	// the CombTree comment records.
+	pd.Nav = s.buildNav(pd.ActivePage, pd.ActiveNodeID, pd.CanOperate, pd.CanAdmin, combs, nil)
 	return pd
 }
 
@@ -1233,6 +1294,17 @@ func (s *Server) routes() {
 	// Viewer: every read-only page/route.
 	s.mux.HandleFunc("GET /{$}", s.handleClusterOverviewPage)
 	s.mux.HandleFunc("GET /cluster-health.json", s.handleClusterHealthJSON)
+	// The Blend overview's refreshing fragments (handoff 7.5). Each
+	// swaps ONE section of the landing page, so a status-line refresh
+	// never rebuilds the Combs list and vice versa. All three are
+	// Viewer-readable: they carry the same evidence the page itself
+	// shows, and gating them would gate the overview.
+	s.mux.HandleFunc("GET /overview/status", s.handleOverviewStatus)
+	s.mux.HandleFunc("GET /overview/attention", s.handleOverviewAttention)
+	s.mux.HandleFunc("GET /overview/combs", s.handleOverviewCombs)
+	// The command palette's result list (handoff 11). Viewer-readable:
+	// it lists only the actions this session may actually perform.
+	s.mux.HandleFunc("GET /palette", s.handlePalette)
 	s.mux.HandleFunc("GET /host/{id}", s.handleHostPage)
 	s.mux.HandleFunc("GET /host/{id}/evidence", s.handleClusterEvidencePage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
@@ -1295,6 +1367,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
 	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
 	s.mux.HandleFunc("GET /resilience-coverage", s.handleCoveragePage)
+	// The Storage > Replication page (handoff section 6). Read-only,
+	// and Viewer-readable: seeing the Colony's replication state is
+	// not a privileged act.
+	s.mux.HandleFunc("GET /replication", s.handleReplicaPage)
 	s.mux.HandleFunc("GET /certificates", s.handleCertificatesPage)
 
 	// The host package inventory page (internal/hostpkg). Read-only and

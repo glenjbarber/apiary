@@ -6,40 +6,64 @@
   <link rel="icon" type="image/png" href="/static/apiary-mark.png">
   <link rel="apple-touch-icon" href="/static/apiary-mark.png">
   <script>
-    (function () {
-      try {
-        var saved = localStorage.getItem("apiary-theme");
-        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-        document.documentElement.dataset.theme = theme;
-      } catch (_) {}
-    }());
+    /* The Blend design (the "Apiary: UI Redesign" handoff's section 10)
+       is DARK SLATE, and it is dark slate unconditionally for now.
+
+       The old UI had a light/dark toggle. The handoff's open question
+       1 asks whether a light variant should be kept, and it is Glen's
+       call - so this does NOT ship a light theme, and it does not ship
+       a toggle that pretends to. It ships the one theme the design
+       specifies.
+
+       The data-theme attribute is still set, because the stylesheet
+       has a handful of rules keyed on it and removing the attribute
+       would silently change how those render. It is set to "dark"
+       unconditionally, and the old preference is deliberately NOT
+       read: a browser that had "light" saved from the previous UI
+       must not render the new design in a theme the design does not
+       define. */
+    document.documentElement.dataset.theme = "dark";
   </script>
   <script src="/static/htmx.min.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
+    /* The Blend token set (the "Apiary: UI Redesign" handoff's section
+       10). Dark slate is the default theme.
+
+       The status colors are the seven states of section 9, and they are
+       the ONLY place a status color is defined - every dot, chip, and
+       meter draws from these seven.
+
+       unknown and not-applicable are deliberately different colors. A
+       check that did not complete and a check that does not apply are
+       different facts, and they must never share a style. */
     :root {
-      color-scheme:light; accent-color:var(--yellow);
-      --ink:#171717; --muted:#686868; --line:#dedede; --panel:#fff;
-      --wash:#f6f5f1; --yellow:#ffc928; --danger:#a62020;
-      --success:#166534; --header:#0e1112; --sidebar:#171a1b;
-      --sidebar-ink:#ececec; --sidebar-muted:#92999c;
-      --table-head:#fafafa; --row-hover:#fffdf4; --field:#fff;
-      --shadow:0 1px 2px rgba(0,0,0,.04);
-      --link:#2450c4; --link-hover:#163a99; --focus:rgba(255,201,40,.55);
-      --sidebar-hover:#272d2f; --sidebar-rule:#303537;
-      /* Status vocabulary (docs/web-ui-redesign.md Section 3.1): seven
-         states every StateChip/badge and Gauge fill draws from, so a
-         new page reaches for a name instead of inventing a color.
-         unknown and not-applicable are deliberately different colors -
-         a failed check and an inapplicable one are different facts. */
-      --status-ok:var(--success); --status-warn:#765600;
-      --status-critical:var(--danger); --status-unknown:var(--muted);
-      --status-not-applicable:#6685ef; --status-stale:var(--muted);
+      color-scheme:dark; accent-color:var(--accent);
+      --bg:#272d38; --bg-rail:#20252e; --panel:#2e3542; --hover:#374050;
+      --line:#3d4655; --line-soft:#333b48;
+      --ink:#e6e9ee; --muted:#9aa4b4; --faint:#6f7a8c;
+      --accent:#ffc928; --accent-ink:#1b1d22;
+      --ok:#6fcf97; --warn:#e9a23b; --crit:#f07171; --stale:#8a93a3;
+      --unk:#8a93a3; --na:#7f9cf5; --contra:#d47fe0;
+      --radius:6px; --radius-card:8px;
+      --sans:-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      /* Legacy aliases. The old token names are still referenced by
+         pages this redesign did not touch, and renaming every one of
+         them would be a large whitespace-heavy diff hiding the real
+         change. These map the old names onto the new palette so both
+         vocabularies render the same. */
+      --yellow:var(--accent); --danger:var(--crit); --success:var(--ok);
+      --wash:var(--bg); --header:var(--bg-rail); --sidebar:var(--bg-rail);
+      --sidebar-ink:var(--ink); --sidebar-muted:var(--muted);
+      --table-head:var(--panel); --row-hover:var(--hover); --field:var(--bg);
+      --link:var(--accent); --link-hover:var(--accent);
+      --focus:rgba(255,201,40,.55);
+      --sidebar-hover:var(--hover); --sidebar-rule:var(--line-soft);
+      --status-ok:var(--ok); --status-warn:var(--warn);
+      --status-critical:var(--crit); --status-unknown:var(--unk);
+      --status-not-applicable:var(--na); --status-stale:var(--stale);
       --gauge-track:var(--line);
-      /* Spacing scale: new code should reach for these instead of an ad
-         hoc rem literal. Existing declarations are not mass-migrated to
-         match - that would make this one large whitespace-only diff
-         instead of a reviewable one. */
       --space-1:.25rem; --space-2:.5rem; --space-3:.75rem; --space-4:1rem;
       --space-5:1.5rem; --space-6:2rem; --space-7:3rem;
     }
@@ -49,19 +73,13 @@
        keeps its own literal pixel value; this comment is the one place
        that names what those three numbers mean and keeps them from
        drifting apart silently.
-         620px  - .app-header compacts, forms go single-column
-         900px  - .sidebar becomes a dismissible drawer
+         620px  - the rail becomes a top bar of icons, forms go single-column
+         900px  - the matrix scrolls horizontally, cards drop to two columns
          1200px - dashboard layouts may go to three columns above this */
-    :root[data-theme="dark"] {
-      color-scheme:dark;
-      --ink:#eeeeec; --muted:#a9adaf; --line:#33393c; --panel:#14191b;
-      --wash:#0d1113; --danger:#ff9696; --success:#74d99a;
-      --header:#080b0c; --sidebar:#111516; --sidebar-ink:#eeeeec;
-      --sidebar-muted:#9ba2a5; --table-head:#191f21; --row-hover:#1b2224;
-      --field:#111618; --shadow:0 1px 2px rgba(0,0,0,.35);
-      --link:#9db6ff; --link-hover:#c6d4ff;
-      --status-warn:#ffe08a;
-    }
+    /* ---- The Blend chrome --------------------------------------------
+       The icon rail on the left, the top bar across the content column,
+       and the content below it. The rail and top bar stay in place
+       while the content scrolls (handoff section 5). */
     * { box-sizing:border-box; }
     html, body { min-height:100%; }
     body {
@@ -75,8 +93,265 @@
     a:hover { color:var(--link-hover); text-decoration-thickness:2px; }
     .app-layout {
       display:grid; min-height:100vh;
-      grid-template-columns:16rem minmax(0, 1fr);
-      grid-template-rows:4.5rem minmax(0, 1fr) auto;
+      grid-template-columns:72px minmax(0, 1fr);
+      grid-template-rows:auto minmax(0, 1fr) auto;
+    }
+    /* The rail. Fixed width, sticky, full height, background slightly
+       darker than the page. */
+    .rail {
+      position:sticky; top:0; grid-column:1; grid-row:1 / 4;
+      display:flex; flex-direction:column; align-items:center;
+      height:100vh; padding:14px 0; gap:4px;
+      background:var(--bg-rail); border-right:1px solid var(--line-soft);
+      overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+    }
+    .rail::-webkit-scrollbar { width:6px; }
+    .rail::-webkit-scrollbar-thumb { background:var(--line); border-radius:999px; }
+    .rail-logo {
+      width:22px; height:22px; margin-bottom:16px; flex:none;
+      background:var(--accent);
+      clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+    }
+    .rail-item {
+      position:relative; width:60px; padding:8px 0 6px; flex:none;
+      display:flex; flex-direction:column; align-items:center; gap:4px;
+      border-radius:var(--radius-card); color:var(--faint);
+      font-size:10.5px; line-height:1.1; text-align:center;
+      text-decoration:none;
+    }
+    .rail-item:hover { color:var(--ink); background:var(--panel); }
+    .rail-item.active { color:var(--ink); background:var(--hover); }
+    .rail-item.active .rail-icon { stroke:var(--accent); }
+    .rail-icon { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+    /* The amber dot. It is a DOT, not a count: it says "something in
+       this section needs attention", and the Needs-attention list is
+       where the detail lives. */
+    .rail-alert {
+      position:absolute; top:5px; right:12px; width:7px; height:7px;
+      border-radius:50%; background:var(--warn);
+    }
+    .rail-spacer { flex:1; }
+    /* The top bar. */
+    .topbar {
+      position:sticky; top:0; z-index:100; grid-column:2; grid-row:1;
+      display:flex; flex-direction:column; min-width:0;
+      background:var(--bg); border-bottom:1px solid var(--line-soft);
+    }
+    .topbar-main {
+      display:flex; align-items:center; gap:12px; min-width:0;
+      padding:14px 34px 0;
+    }
+    .topbar-title { margin:0; font-size:18px; font-weight:600; color:var(--ink); overflow-wrap:anywhere; }
+    .topbar-search {
+      margin-left:auto; width:300px; height:30px; flex:none;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:0 10px; border:1px solid var(--line); border-radius:var(--radius);
+      color:var(--faint); font-size:13px; cursor:text; background:transparent;
+    }
+    .topbar-search:hover { border-color:var(--muted); color:var(--muted); }
+    .topbar-search kbd {
+      padding:1px 5px; border:1px solid var(--line); border-radius:4px;
+      font-family:var(--mono); font-size:11px; color:var(--muted);
+    }
+    .topbar-actions { display:flex; align-items:center; gap:8px; flex:none; }
+    .account { font-size:12px; color:var(--muted); white-space:nowrap; }
+    .account-role { color:var(--faint); }
+    .login-disabled { white-space:nowrap; }
+    .logout-form { margin:0; }
+    /* The tab strip. The active tab carries a 2px brand-yellow
+       underline. */
+    .tabs { display:flex; gap:22px; padding:0 34px; border-bottom:1px solid var(--line-soft); overflow-x:auto; }
+    .tabs a {
+      padding:8px 0; margin-bottom:-1px; color:var(--muted); font-size:13.5px;
+      border-bottom:2px solid transparent; text-decoration:none; white-space:nowrap;
+    }
+    .tabs a:hover { color:var(--ink); }
+    .tabs a.active { color:var(--ink); border-bottom-color:var(--accent); }
+    /* The health chip in the top bar. */
+    .chip {
+      display:inline-flex; align-items:center; gap:6px; flex:none;
+      padding:2px 9px; border:1px solid transparent; border-radius:999px;
+      font-size:12px; font-weight:600; white-space:nowrap;
+    }
+    .chip.ok { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 40%, transparent); }
+    .chip.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); }
+    .chip.critical { color:var(--crit); border-color:color-mix(in srgb, var(--crit) 45%, transparent); }
+    .chip.unknown { color:var(--unk); border-color:color-mix(in srgb, var(--unk) 45%, transparent); }
+    /* The seven status states (section 9). Each must look different
+       without relying on colour alone, so every dot also carries a
+       text equivalent and a distinct shape. */
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; background:var(--unk); }
+    .dot.ok { background:var(--ok); }
+    .dot.warn { background:var(--warn); }
+    .dot.critical { background:var(--crit); }
+    /* stale: a hollow, dashed ring. */
+    .dot.stale { background:transparent; border:1.5px dashed var(--stale); }
+    /* unknown: a hollow, solid ring. */
+    .dot.unknown { background:transparent; border:1.5px solid var(--unk); }
+    /* not applicable: solid, reduced opacity. */
+    .dot.not-applicable { background:var(--na); opacity:.55; }
+    /* contradictory: solid with a soft halo. */
+    .dot.contradictory { background:var(--contra); box-shadow:0 0 0 3px color-mix(in srgb, var(--contra) 25%, transparent); }
+    .dot.lg { width:10px; height:10px; }
+    /* The command palette (section 11). A 600px dialog near the top
+       of the viewport over a dim scrim. The only shadow in the whole
+       design, and it is on this dialog. */
+    .palette-scrim {
+      position:fixed; inset:0; z-index:400; display:flex;
+      align-items:flex-start; justify-content:center; padding-top:12vh;
+      background:rgba(12,16,24,.55);
+    }
+    .palette-scrim[hidden] { display:none; }
+    .palette {
+      width:600px; max-width:calc(100% - 32px);
+      background:var(--panel); border:1px solid var(--line);
+      border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.45);
+      overflow:hidden; display:flex; flex-direction:column;
+      max-height:70vh;
+    }
+    .palette input {
+      width:100%; height:48px; flex:none; border:0;
+      border-bottom:1px solid var(--line-soft); background:transparent;
+      color:var(--ink); padding:0 18px; font:15px var(--sans); outline:none;
+    }
+    .palette-results { overflow-y:auto; }
+    .palette-group {
+      margin:10px 18px 4px; font-size:11px; color:var(--faint);
+      text-transform:uppercase; letter-spacing:.08em; font-weight:600;
+    }
+    .palette-results a {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:8px 18px; color:var(--ink); font-size:13.5px; text-decoration:none;
+    }
+    .palette-results a span:last-child { color:var(--faint); font-size:12px; }
+    .palette-results a.sel, .palette-results a:hover { background:var(--hover); }
+    .palette-empty { padding:14px 18px; color:var(--faint); font-size:13px; }
+    .palette-footer {
+      display:flex; gap:14px; flex:none; padding:8px 18px;
+      border-top:1px solid var(--line-soft); font-size:11.5px; color:var(--faint);
+    }
+    .palette-footer kbd {
+      padding:1px 5px; border:1px solid var(--line); border-radius:4px;
+      font-family:var(--mono); font-size:11px; color:var(--muted);
+    }
+    /* ---- The Blend overview (handoff section 7) -------------------
+       Sections are separated by whitespace and thin rules, not by
+       heavy cards. Only the Needs-attention list, the cards view, and
+       the matrix get an outline. */
+    .ov-status {
+      display:flex; flex-wrap:wrap; align-items:center; margin:18px 0 26px;
+      font-size:13px; color:var(--muted);
+    }
+    .ov-status.is-stale { opacity:.7; }
+    .ov-metric {
+      display:inline-flex; align-items:center; gap:7px;
+      padding:0 16px; border-left:1px solid var(--line); line-height:18px;
+    }
+    .ov-metric:first-child { padding-left:0; border-left:0; }
+    .ov-metric-label { color:var(--muted); }
+    .ov-metric-value { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+    .ov-metric-value.is-unknown { color:var(--unk); font-weight:400; font-style:italic; }
+    .ov-metric.is-warn .ov-metric-value { color:var(--warn); }
+    .ov-metric.is-warn .ov-metric-label { color:var(--warn); }
+    .ov-stale-note {
+      width:100%; margin-bottom:6px; color:var(--stale); font-size:12px;
+    }
+    .ov-section { margin-bottom:28px; }
+    .ov-section-head {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:1rem; margin:0 0 10px;
+    }
+    .ov-section-head h2 { margin:0; font-size:13px; font-weight:600; color:var(--muted); }
+    /* The Needs-attention list: the one outlined list on the page. */
+    .ov-attention { border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; }
+    .ov-attention-row {
+      display:grid; grid-template-columns:16px 1fr auto; gap:12px;
+      align-items:center; padding:10px 14px; border-top:1px solid var(--line-soft);
+    }
+    .ov-attention-row:first-child { border-top:0; }
+    .ov-attention-text { font-size:13px; color:var(--ink); }
+    .ov-attention-text b { font-weight:650; }
+    .ov-attention-text em { font-style:normal; color:var(--faint); font-size:12px; margin-left:8px; }
+    .ov-attention-action { font-size:13px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+    .ov-attention-action:hover { text-decoration:underline; }
+    .ov-attention-empty { display:block; color:var(--faint); font-size:13px; }
+    /* The segmented control. */
+    .ov-segmented { display:inline-flex; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+    .ov-seg {
+      background:transparent; padding:4px 12px; font-size:12.5px;
+      color:var(--muted); cursor:pointer; border-left:1px solid var(--line);
+      text-decoration:none; white-space:nowrap;
+    }
+    .ov-seg:first-child { border-left:0; }
+    .ov-seg:hover { color:var(--ink); }
+    .ov-seg.active { background:var(--hover); color:var(--ink); }
+    /* The Combs table. */
+    .ov-table-scroll { overflow-x:auto; }
+    .ov-table { width:100%; border-collapse:collapse; }
+    .ov-table th {
+      text-align:left; font-size:12px; font-weight:500; color:var(--faint);
+      padding:0 12px 8px; border-bottom:1px solid var(--line);
+    }
+    .ov-table td { padding:11px 12px; border-bottom:1px solid var(--line-soft); }
+    .ov-table tbody tr:hover td { background:rgba(255,255,255,.02); }
+    .ov-table-name a { display:inline-flex; align-items:center; gap:8px; color:var(--ink); font-weight:600; text-decoration:none; }
+    .ov-table-name a:hover { color:var(--accent); }
+    .ov-role { font-size:12px; color:var(--muted); }
+    .ov-role.is-leader { color:var(--accent); }
+    .ov-num { font-variant-numeric:tabular-nums; }
+    /* A meter: the percentage, then a thin 4px bar. */
+    .ov-res { display:grid; grid-template-columns:34px 1fr; gap:8px; align-items:center; font-size:12px; color:var(--muted); min-width:120px; }
+    .ov-res.is-warn .ov-num { color:var(--warn); }
+    .ov-res.is-unknown .ov-num { color:var(--unk); font-style:italic; }
+    .ov-meter-track { display:block; height:4px; border-radius:999px; background:var(--line); overflow:hidden; }
+    .ov-meter-track i { display:block; height:100%; background:var(--ink); border-radius:999px; }
+    .ov-res.is-warn .ov-meter-track i { background:var(--warn); }
+    /* The cards view. */
+    .ov-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .ov-card { background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--radius-card); padding:16px; }
+    .ov-card.is-warn { border-color:color-mix(in srgb, var(--warn) 45%, transparent); }
+    .ov-card.is-critical { border-color:color-mix(in srgb, var(--crit) 45%, transparent); }
+    .ov-card h3 { margin:0; font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; }
+    .ov-card h3 small {
+      margin-left:auto; font-weight:400; font-size:11px; color:var(--accent);
+      text-transform:uppercase; letter-spacing:.08em;
+    }
+    .ov-card-os { font-size:12px; color:var(--faint); margin:2px 0 14px; }
+    .ov-meter { display:grid; grid-template-columns:52px 1fr 36px; gap:8px; align-items:center; font-size:12px; color:var(--muted); margin:6px 0; }
+    .ov-meter .ov-num { text-align:right; color:var(--ink); }
+    .ov-cells { display:flex; flex-wrap:wrap; gap:4px; margin-top:14px; padding-top:12px; border-top:1px solid var(--line-soft); }
+    .ov-chip { font-size:11.5px; padding:1px 7px; border-radius:4px; background:var(--bg); color:var(--muted); text-decoration:none; }
+    /* A stopped cell is struck through in faint text. */
+    .ov-chip.is-stopped { color:var(--faint); text-decoration:line-through; text-decoration-color:rgba(255,255,255,.2); }
+    /* The matrix view. */
+    .ov-matrix-scroll { overflow-x:auto; }
+    .ov-matrix {
+      width:100%; border-collapse:separate; border-spacing:0; background:var(--panel);
+      border:1px solid var(--line-soft); border-radius:var(--radius-card); overflow:hidden;
+    }
+    .ov-matrix th { font-size:11.5px; font-weight:500; color:var(--faint); padding:10px 6px; text-align:center; border-bottom:1px solid var(--line-soft); }
+    .ov-matrix th:first-child { text-align:left; padding-left:16px; }
+    .ov-matrix td { text-align:center; padding:11px 6px; border-bottom:1px solid var(--line-soft); }
+    .ov-matrix tr:last-child td { border-bottom:0; }
+    .ov-matrix td:first-child { text-align:left; padding-left:16px; font-weight:600; }
+    .ov-matrix td:first-child a { color:var(--ink); text-decoration:none; }
+    .ov-matrix td:first-child small { font-weight:400; color:var(--accent); font-size:11px; margin-left:6px; }
+    .ov-matrix tbody tr:hover td { background:rgba(255,255,255,.025); }
+    .ov-legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:10px; font-size:12px; color:var(--muted); }
+    .ov-legend span { display:flex; align-items:center; gap:6px; }
+    .ov-empty { color:var(--faint); font-size:13px; }
+    .ov-unknown { color:var(--unk); font-style:italic; }
+    .ov-preflight { margin:0 0 28px; color:var(--muted); font-size:12.5px; }
+    .ov-digest { margin:0 0 10px; color:var(--muted); font-size:12.5px; }
+    .ov-suffrage { margin-top:.25rem; }
+    .ov-cause { margin-top:.3rem; color:var(--muted); font-size:12px; }
+    .ov-cause .badge { font-size:10.5px; padding:.1rem .4rem; }
+    .ov-cell-links { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.3rem; }
+    .ov-cell-links a { font-size:11px; color:var(--muted); text-decoration:none; }
+    .ov-cell-links a:hover { color:var(--accent); }
+    .visually-hidden {
+      position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+      overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
     }
     .login-layout { display:grid; place-items:center; min-height:100vh; padding:2rem 1.25rem; }
     .login-panel { width:min(100%, 28rem); padding:2rem; background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
@@ -86,82 +361,50 @@
     .login-panel form { align-items:stretch; flex-direction:column; margin-top:1.25rem; }
     .skip-link { position:fixed; left:1rem; top:-5rem; z-index:300; padding:.6rem .8rem; background:var(--yellow); color:#111; font-weight:750; }
     .skip-link:focus { top:1rem; }
-    .app-header {
-      position:sticky; top:0; z-index:100; grid-column:1 / -1;
-      display:flex; align-items:center; justify-content:space-between; gap:1rem;
-      min-width:0; padding:.65rem 1.25rem; color:#fff; background:var(--header);
-      border-bottom:1px solid #282d2f;
-    }
-    .header-left, .header-actions { display:flex; align-items:center; gap:.65rem; min-width:0; }
-    .brand { display:flex; align-items:center; gap:.55rem; color:#fff; text-decoration:none; }
+    /* The brand mark, used by the login page and by the rail's own
+       hexagon. The rail's mark is drawn in CSS (a clip-path hexagon)
+       rather than as an image, so it stays the brand yellow at every
+       size. */
+    .brand { display:flex; align-items:center; gap:.55rem; color:var(--ink); text-decoration:none; }
     .brand-logo { width:34px; height:34px; display:block; }
     .brand-name { font-weight:850; font-size:1.15rem; letter-spacing:.06em; }
-    .icon-button.sidebar-toggle { display:none; }
-    .account { display:flex; flex-direction:column; align-items:flex-end; min-width:0; line-height:1.2; }
-    .account-user { font-size:.84rem; color:#f4f4f4; }
     /* colony-leader: the header's current-Colony-leader indicator (ADR-0123).
        The label line names the node that produced the reading (raft or manager
        node ID), so the operator always knows which Comb answered the Status
        call. max-width plus overflow-wrap keeps a long hostname from pushing
        the theme and settings controls off the header on a narrow viewport. */
-    .colony-leader { display:flex; flex-direction:column; align-items:flex-end; min-width:0; max-width:22rem; line-height:1.2; }
-    .colony-leader-label { font-size:.76rem; color:#aeb4b6; overflow-wrap:anywhere; }
+    .colony-leader { display:flex; flex-direction:column; align-items:flex-end; min-width:0; max-width:18rem; line-height:1.2; flex:none; }
+    .colony-leader-label { font-size:.72rem; color:var(--faint); overflow-wrap:anywhere; }
     .colony-leader .badge { margin-top:.22rem; overflow-wrap:normal; white-space:nowrap; text-align:center; }
-    .app-header .badge { white-space:nowrap; }
-    .app-header .badge:not(.ready):not(.error):not(.degraded) { color:#d7dbdc; background:transparent; border:1px solid #42484a; font-weight:600; }
-    .colony-leader-here, .colony-leader-raft-state { margin-top:.2rem; font-size:.72rem; color:#aeb4b6; overflow-wrap:anywhere; }
-    .colony-leader-raft-state { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .icon-button, .settings-menu > summary {
-      display:grid; place-items:center; width:2.35rem; height:2.35rem;
-      padding:0; border:1px solid #42484a; border-radius:8px;
-      color:#f3f3f3; background:#1a1f21; text-decoration:none;
+    .colony-leader-here, .colony-leader-raft-state { margin-top:.2rem; font-size:.7rem; color:var(--faint); overflow-wrap:anywhere; }
+    .colony-leader-raft-state { font-family:var(--mono); }
+    /* The small square icon button, used by the image list's copy
+       control. */
+    .icon-button {
+      display:grid; place-items:center; min-width:2.35rem; height:2.35rem;
+      padding:0 .5rem; border:1px solid var(--line); border-radius:8px;
+      color:var(--ink); background:var(--panel); text-decoration:none; cursor:pointer;
     }
-    .icon-button:hover, .settings-menu > summary:hover,
-    .settings-menu[open] > summary { background:#2b3234; }
-    .settings-menu { position:relative; }
-    .settings-menu > summary { list-style:none; font-size:1.15rem; }
-    .settings-menu > summary::-webkit-details-marker { display:none; }
-    .settings-menu.current > summary { color:#111; background:var(--yellow); border-color:var(--yellow); }
-    .settings-items {
-      position:absolute; z-index:210; top:calc(100% + .55rem); right:0;
-      min-width:13rem; padding:.4rem; color:var(--ink); background:var(--panel);
-      border:1px solid var(--line); border-radius:9px; box-shadow:0 10px 30px rgba(0,0,0,.32);
-    }
-    .settings-items a, .settings-items button {
-      display:block; width:100%; padding:.55rem .65rem; border:0; border-radius:6px;
-      color:var(--ink); background:transparent; font:inherit; font-size:.9rem;
-      font-weight:500; text-align:left; text-decoration:none; cursor:pointer;
-    }
-    .settings-items a:hover, .settings-items button:hover { background:var(--row-hover); }
-    .settings-items .active { color:#111; background:var(--yellow); font-weight:750; }
-    .settings-items form { margin:0; border-top:1px solid var(--line); padding-top:.3rem; margin-top:.3rem; }
-    .sidebar {
-      position:sticky; top:4.5rem; grid-column:1; grid-row:2 / 4;
-      align-self:start; height:calc(100vh - 4.5rem); overflow-y:auto;
-      padding:.8rem .7rem 1.25rem; color:var(--sidebar-ink);
-      background:var(--sidebar); border-right:1px solid #2b3032;
-      scrollbar-width:thin; scrollbar-color:#4a5052 transparent;
-    }
-    .sidebar::-webkit-scrollbar { width:8px; }
-    .sidebar::-webkit-scrollbar-track { background:transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background:#4a5052; border-radius:999px; }
-    .sidebar-section { padding:.1rem 0 .55rem; border-bottom:1px solid var(--sidebar-rule); margin-bottom:.5rem; }
-    .sidebar-section:last-child { border-bottom:0; }
-    .sidebar-heading { margin:.1rem .65rem .25rem; color:var(--sidebar-muted); font-size:.66rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
-    .sidebar-link { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
-    .sidebar-link:hover { color:#fff; background:var(--sidebar-hover); }
-    .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
-    /* The sidebar's Colony tree (ADR-0144's CombTree). A Comb, its
-       suffrage, and the cells it owns, nested one level apart. */
+    .icon-button:hover { background:var(--hover); }
+    /* The Comb tree's own rules (ADR-0144's CombTree). A Comb, its
+       suffrage, and the cells it owns, nested one level apart. The
+       tree itself moved from the old text sidebar into the new rail's
+       Combs section, but the nesting is the same, so the rules are
+       the same. */
     .sidebar-tree { list-style:none; margin:0; padding:0; }
     .sidebar-tree-item { margin:.1rem 0 .35rem; }
     .sidebar-tree-cells { list-style:none; margin:.12rem 0 .1rem .8rem; padding:0 0 0 .45rem; border-left:1px solid var(--sidebar-rule); }
-    .sidebar-tree-cells .sidebar-link { padding:.22rem .5rem; font-size:.8rem; color:var(--sidebar-muted); }
-    .sidebar-tree-cells .sidebar-link:hover { color:#fff; }
     .sidebar-tree-item .badge { margin-left:.35rem; vertical-align:middle; }
-    .sidebar-note { margin:.45rem .65rem .1rem; color:var(--sidebar-muted); font-size:.66rem; line-height:1.35; }
-    .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
-    .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
+    /* The content column. 22px top, 34px sides, max width 1240px,
+       left aligned (handoff section 5). */
+    .content {
+      grid-column:2; grid-row:2; min-width:0; width:100%;
+      max-width:1240px; padding:22px 34px 60px;
+    }
+    .app-footer {
+      grid-column:2; grid-row:3; padding:1rem 34px 1.5rem;
+      color:var(--faint); font-size:.78rem; border-top:1px solid var(--line-soft);
+    }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
     h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
     h3 { margin-top:1.75rem; }
@@ -431,24 +674,45 @@
       box-shadow:0 6px 20px rgba(0,0,0,.28);
     }
     @media (max-width:900px) {
-      .app-layout { grid-template-columns:minmax(0, 1fr); }
-      .icon-button.sidebar-toggle { display:inline-grid; }
-      .sidebar { position:fixed; z-index:90; top:4.5rem; bottom:0; left:0; width:min(18rem, 86vw); height:auto; transform:translateX(-105%); transition:transform .18s ease; box-shadow:8px 0 24px rgba(0,0,0,.32); }
-      .nav-open .sidebar { transform:translateX(0); }
-      .content, .app-footer { grid-column:1; }
-      .content { padding:1.35rem 1rem 2.5rem; }
-      .app-footer { padding:1rem; }
+      /* Under 900px the matrix scrolls horizontally inside its own
+         box, and the cards drop to two columns (handoff 12). The page
+         itself never scrolls horizontally. */
+      .ov-cards { grid-template-columns:repeat(2,1fr); }
+      .content { padding:18px 20px 3rem; }
+      .app-footer { padding:1rem 20px 1.5rem; }
+      .topbar-main { padding:12px 20px 0; }
+      .tabs { padding:0 20px; }
       table { display:block; overflow-x:auto; }
       .table-scroll > table { display:table; overflow:visible; }
     }
     @media (max-width:620px) {
-      .app-header { padding:.6rem .75rem; }
-      .brand-name { display:none; }
-      .icon-button, .settings-menu > summary { flex:none; }
-      .header-actions { gap:.4rem; }
-      .header-actions > .badge { display:inline-block; max-width:6.5rem; overflow:hidden; text-overflow:ellipsis; }
-      .colony-leader { max-width:9rem; }
-      .colony-leader-label, .colony-leader-here, .colony-leader-raft-state { display:none; }
+      /* Under 620px the rail becomes a top bar of icons (handoff
+         section 12). */
+      .app-layout { grid-template-columns:minmax(0, 1fr); }
+      .rail {
+        grid-column:1; grid-row:1; position:sticky; top:0;
+        width:auto; height:auto; flex-direction:row; gap:2px;
+        padding:6px 8px; overflow-x:auto; border-right:0;
+        border-bottom:1px solid var(--line-soft);
+      }
+      .rail-logo { margin:0 6px 0 0; }
+      .rail-item { width:auto; min-width:44px; padding:4px 6px; }
+      .rail-item span:last-child { font-size:9.5px; }
+      .rail-spacer { display:none; }
+      .topbar { grid-column:1; grid-row:2; }
+      .content { grid-column:1; grid-row:3; }
+      .app-footer { grid-column:1; grid-row:4; }
+      .topbar-main { padding:10px 14px 0; flex-wrap:wrap; }
+      .topbar-title { font-size:16px; }
+      .topbar-search { width:100%; margin-left:0; order:3; }
+      .tabs { padding:0 14px; gap:16px; }
+      /* Under 620px the cards go to one column, and the table hides
+         Uptime and ZFS (handoff 12). */
+      .ov-cards { grid-template-columns:1fr; }
+      .ov-table th:nth-child(5), .ov-table td:nth-child(5),
+      .ov-table th:nth-child(7), .ov-table td:nth-child(7) { display:none; }
+      .content { padding:14px 14px 2.5rem; }
+      .app-footer { padding:1rem 14px; }
       .account-user { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       form.upload-iso, form.inline-form { align-items:stretch; }
       form.upload-iso label, form.inline-form label { min-width:100%; }
@@ -461,26 +725,72 @@
       .vm-controls, .danger-zone { align-items:flex-start; flex-direction:column; }
       .page-header { align-items:flex-start; }
     }
-    @media (prefers-reduced-motion:reduce) { .sidebar { transition:none; } }
+    @media (prefers-reduced-motion:reduce) { .rail { transition:none; } }
   </style>
 </head>
 {{end}}
 
+{{define "rail_icon"}}
+{{/* The rail's line icons, one per section. They are drawn here rather
+     than inlined as markup at each call site so the whole set is in one
+     place and a section cannot inject anything into the page. */}}
+{{if eq . "overview"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/></svg>
+{{else if eq . "cells"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+{{else if eq . "combs"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M8 7h.01M8 17h.01"/></svg>
+{{else if eq . "network"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8 11l8-4M8 13l8 4"/></svg>
+{{else if eq . "storage"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg>
+{{else if eq . "images"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg>
+{{else if eq . "colony"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="2.5"/><circle cx="6.5" cy="16" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/><path d="M10.8 9.2l-3 4.6M13.2 9.2l3 4.6M9 16h6"/></svg>
+{{else if eq . "settings"}}<svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+{{end}}
+{{end}}
+
 {{define "nav"}}
+{{/*
+  The Blend chrome: the icon rail on the left and the top bar across
+  the content column (handoff section 5).
+
+  Both are rendered from .Nav, which the server builds from the
+  navigation table in nav.go. That table is the single place the
+  information architecture lives, so the rail, the tab strip, and the
+  palette's "Go to" list cannot disagree about where a page lives.
+
+  The rail is a <nav> with an aria-label, and the active item carries
+  aria-current="page" (section 12). Labels are always visible: an
+  icon never appears without one.
+*/}}
 <a class="skip-link" href="#main-content">Skip to content</a>
-<header class="app-header">
-  <div class="header-left">
-    <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="false">&#9776;</button>
-    <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
-  </div>
-  <div class="header-actions">
-    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span></div>{{end}}{{else}}<span class="badge" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
+<nav class="rail" aria-label="Primary navigation">
+  <a class="rail-logo" href="/" aria-label="Apiary home"></a>
+  {{range .Nav}}{{if not .Pinned}}
+  <a class="rail-item{{if .Active}} active{{end}}" href="{{.Href}}"{{if .Active}} aria-current="page"{{end}}>
+    {{template "rail_icon" .Icon}}{{if .Alert}}<span class="rail-alert" title="Something in this section needs attention"></span>{{end}}
+    <span>{{.Label}}</span>
+  </a>
+  {{end}}{{end}}
+  <div class="rail-spacer"></div>
+  {{range .Nav}}{{if .Pinned}}
+  <a class="rail-item{{if .Active}} active{{end}}" href="{{.Href}}"{{if .Active}} aria-current="page"{{end}}>
+    {{template "rail_icon" .Icon}}{{if .Alert}}<span class="rail-alert" title="Something in this section needs attention"></span>{{end}}
+    <span>{{.Label}}</span>
+  </a>
+  {{end}}{{end}}
+</nav>
+<header class="topbar">
+  <div class="topbar-main">
+    <h1 class="topbar-title">{{with .Overview.ColonyName}}{{.}}{{else}}Apiary{{end}}</h1>
     {{/*
-      Colony leader indicator (ADR-0123). Every field comes from a single
-      live managerd Status call made by withAuthFields - nothing here is
-      remembered, cached, or configured. .ColonyLeader.Detail carries the
-      reason for every non-known state, including the unknown one, so the
-      title attribute can never promise more than the page actually proved.
+      The Colony-leader indicator (ADR-0123). It stays in the top bar
+      because it is a fact every page needs and it must name the node
+      that produced the reading: one raftd's view is not a
+      cluster-wide agreement, and a leader name without its source
+      would read as a Colony-wide claim it is not.
+
+      The label line names the source; the badge says the verdict; and
+      "this Comb" marks the case where the local node is the leader.
+      The .ColonyLeader.Detail carries the reason for every non-known
+      state, so the title attribute can never promise more than the
+      page actually proved.
     */}}
     <div class="colony-leader" title="{{with .ColonyLeader.Detail}}{{.}} {{end}}{{if .ColonyLeader.Observed}}Point-in-time read at {{.ColonyLeader.ObservedAt.Format "15:04:05"}}; leadership can change on the next election.{{end}}">
       <span class="colony-leader-label">{{.ColonyLeader.SourceLine}}</span>
@@ -488,126 +798,142 @@
       {{if and .ColonyLeader.IsLocal (eq .ColonyLeader.State "known")}}<span class="colony-leader-here">this Comb</span>{{end}}
       {{if and .ColonyLeader.RaftState (ne .ColonyLeader.State "known")}}<span class="colony-leader-raft-state">raft {{.ColonyLeader.RaftState}}</span>{{end}}
     </div>
-    <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span aria-hidden="true">&#9788;</span></button>
-    <details class="settings-menu{{if or (eq .ActivePage "machine") (eq .ActivePage "apikeys") (eq .ActivePage "users")}} current{{end}}">
-      <summary aria-label="Open settings" title="Settings">&#9881;</summary>
-      <div class="settings-items">
-        {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active" aria-current="page"{{end}}>Machine</a>{{end}}
-        <a href="/users"{{if eq .ActivePage "users"}} class="active" aria-current="page"{{end}}>Users</a>
-        {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active" aria-current="page"{{end}}>API Keys</a>{{end}}
-        {{if .AuthEnabled}}<form method="post" action="/logout"><button type="submit">Log out</button></form>{{end}}
-      </div>
-    </details>
-  </div>
-</header>
-<aside class="sidebar" id="primary-navigation">
-  <nav class="sidebar-nav" aria-label="Primary navigation">
-    {{/*
-      Four functional sections, not the product hierarchy (Apiary >
-      Colony > Comb > Cell) verbatim: Resources is what runs or is
-      stored (Cells and media together, since an operator reaching for
-      a VM/jail/ISO is doing the same kind of task regardless of which
-      one); Topology is the network layer these resources attach to;
-      Colony is cluster-wide evidence and planning tools that never
-      name one Comb; Combs is the one section that is genuinely
-      per-node, linking each known Comb to its own evidence page. See
-      docs/web-ui-redesign.md's Section D.
-    */}}
-    <section class="sidebar-section" aria-labelledby="nav-resources">
-      <h2 class="sidebar-heading" id="nav-resources">Resources</h2>
-      <a class="sidebar-link{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual Machines</a>
-      <a class="sidebar-link{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
-      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and Disk Images</a>
-    </section>
-    <section class="sidebar-section" aria-labelledby="nav-topology">
-      <h2 class="sidebar-heading" id="nav-topology">Topology</h2>
-      <a class="sidebar-link{{if eq .ActivePage "networks"}} active{{end}}" href="/networks"{{if eq .ActivePage "networks"}} aria-current="page"{{end}}>Networks</a>
-      <a class="sidebar-link{{if eq .ActivePage "topology"}} active{{end}}" href="/topology"{{if eq .ActivePage "topology"}} aria-current="page"{{end}}>Network Map</a>
-      <a class="sidebar-link{{if eq .ActivePage "trace"}} active{{end}}" href="/trace"{{if eq .ActivePage "trace"}} aria-current="page"{{end}}>Path Trace</a>
-    </section>
-    <section class="sidebar-section" aria-labelledby="nav-colony">
-      <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
-      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Command Center</a>
+    {{if .Overview.Chip.Label}}<span class="chip {{.Overview.Chip.State}}" title="{{.Overview.Chip.Detail}}"><i class="dot {{.Overview.Chip.State}}" aria-hidden="true"></i><span class="visually-hidden">{{.Overview.Chip.State}}</span>{{.Overview.Chip.Label}}</span>{{end}}
+    <div class="topbar-search" id="palette-open" role="button" tabindex="0" aria-label="Search or run a command" title="Search or run a command (press /)">Search or run a command <kbd>/</kbd></div>
+    <div class="topbar-actions">
       {{/*
-        Colony update (ADR-0145). Placed in the Colony section rather
-        than the command center's own sub-navigation because it is a
-        separate page that polls its own live panel, not another panel
-        on the summary - see handleColonyUpdatePage's own comment for
-        why the cockpit-topology-list is deliberately not touched.
-        Visible to every role, because every role may read the truth
-        about what the Colony is doing; the control it gates is Admin.
+        The session's own identity and its way out.
+
+        The "Login disabled" badge is a real discoverability fix, not
+        decoration: with no -pam-service configured there is no login
+        page, and without this an operator had to notice the ABSENCE
+        of a login link to work out that this was intentional rather
+        than broken.
       */}}
-      <a class="sidebar-link{{if eq .ActivePage "colony-update"}} active{{end}}" href="/colony-update"{{if eq .ActivePage "colony-update"}} aria-current="page"{{end}}>Colony update</a>
-      <a class="sidebar-link{{if eq .ActivePage "assumptions"}} active{{end}}" href="/assumptions"{{if eq .ActivePage "assumptions"}} aria-current="page"{{end}}>Assumptions</a>
-      <a class="sidebar-link{{if eq .ActivePage "assumption-register"}} active{{end}}" href="/assumption-register"{{if eq .ActivePage "assumption-register"}} aria-current="page"{{end}}>Assumption Register</a>
-      <a class="sidebar-link{{if eq .ActivePage "simulate"}} active{{end}}" href="/simulate"{{if eq .ActivePage "simulate"}} aria-current="page"{{end}}>Simulations</a>
-      <a class="sidebar-link{{if eq .ActivePage "recovery-handbook"}} active{{end}}" href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} aria-current="page"{{end}}>Recovery Handbook</a>
-      <a class="sidebar-link{{if eq .ActivePage "invariants"}} active{{end}}" href="/invariants"{{if eq .ActivePage "invariants"}} aria-current="page"{{end}}>Invariants</a>
-      <a class="sidebar-link{{if eq .ActivePage "why-not"}} active{{end}}" href="/why-not"{{if eq .ActivePage "why-not"}} aria-current="page"{{end}}>Why Not</a>
-      <a class="sidebar-link{{if eq .ActivePage "resilience-coverage"}} active{{end}}" href="/resilience-coverage"{{if eq .ActivePage "resilience-coverage"}} aria-current="page"{{end}}>Coverage Map</a>
-      <a class="sidebar-link{{if eq .ActivePage "certificates"}} active{{end}}" href="/certificates"{{if eq .ActivePage "certificates"}} aria-current="page"{{end}}>Certificates</a>
-      <a class="sidebar-link{{if eq .ActivePage "trust"}} active{{end}}" href="/machine/trust"{{if eq .ActivePage "trust"}} aria-current="page"{{end}}>Peer Trust</a>
-    </section>
-    {{if .CombTree.Combs}}
-    <section class="sidebar-section" aria-labelledby="nav-combs">
-      <h2 class="sidebar-heading" id="nav-combs">Combs</h2>
-      <ul class="sidebar-tree combs">
-        {{range .CombTree.Combs}}
-        <li class="sidebar-tree-item">
-          <a class="sidebar-link comb-link" href="/host/{{.NodeID}}" title="{{.NodeID}} - raft membership and evidence{{if .Address}} at {{.Address}}{{end}}">{{.NodeID}}</a>
-          {{if .IsLeader}}<span class="badge badge-leader" title="This Comb currently holds raft leadership">leader</span>{{end}}
-          {{if .Suffrage}}<span class="badge badge-suffrage" title="Raft suffrage. This is MEMBERSHIP, not a health verdict - the Comb's own health is on its detail page.">{{.Suffrage}}</span>{{end}}
-          {{if .Cells}}
-          <ul class="sidebar-tree-cells">
-            {{range .Cells}}<li><a class="sidebar-link cell-link" href="{{.Href}}" title="{{.Type}} {{.ID}}{{if .Name}} - {{.Name}}{{end}}">{{.ID}}</a></li>{{end}}
-          </ul>
-          {{end}}
-        </li>
-        {{end}}
-      </ul>
-      <p class="sidebar-note">Membership, not health. A Comb's own verdict is on its page.</p>
-    </section>
-    {{end}}
+      {{if .AuthEnabled}}{{if .Username}}<span class="account" title="Signed in as {{.Username}} ({{.Role}})">{{.Username}} <span class="account-role">({{.Role}})</span></span>{{end}}
+      {{else}}<span class="badge login-disabled" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
+      {{if .CanOperate}}<a class="button secondary" href="/machine#join-colony">Add comb</a>{{end}}
+      {{if .CanOperate}}<a class="button" href="/create?kind=vm">Create cell</a>{{end}}
+      {{if .AuthEnabled}}<form method="post" action="/logout" class="logout-form"><button type="submit" class="button secondary">Log out</button></form>{{end}}
+    </div>
+  </div>
+  {{/* The tab strip: the second level of navigation. There is no third
+       level. The active section's label names the strip, so a reader
+       knows which section the tabs belong to. */}}
+  {{$active := .}}
+  {{$activeLabel := ""}}
+  {{range .Nav}}{{if .Active}}{{$activeLabel = .Label}}{{end}}{{end}}
+  {{if $activeLabel}}
+  <nav class="tabs" aria-label="{{$activeLabel}} section pages">
+    {{range .Nav}}{{if .Active}}{{range .Tabs}}<a class="{{if .Active}}active{{end}}" href="{{.Href}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}{{end}}{{end}}
   </nav>
-</aside>
+  {{end}}
+</header>
 {{end}}
 
 {{define "footer"}}
 <footer class="app-footer">Apiary &middot; FreeBSD-native Colony management</footer>
+{{/*
+  The command palette (handoff section 11).
+
+  It opens on "/" (unless focus is in a text field) or on a click in the
+  search field, closes on Escape or a click outside, and traps focus
+  while it is open and returns it on close.
+
+  The result list is a fragment swapped by htmx from GET /palette?q=.
+*/}}
+<div class="palette-scrim" id="palette-scrim" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input id="palette-input" type="text" placeholder="Type a command, cell, or comb" autocomplete="off"
+           hx-get="/palette" hx-trigger="input changed delay:150ms" hx-target="#palette-results" hx-swap="innerHTML">
+    <div id="palette-results" class="palette-results"></div>
+    <footer class="palette-footer"><span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Esc</kbd> close</span></footer>
+  </div>
+</div>
 <script>
+  /* The command palette.
+     One small inline script: it opens on "/" or a click on the search
+     field, closes on Escape or an outside click, and moves a selection
+     with the arrow keys. The script is deliberately small and inline
+     because it is needed on every page and the palette is the only
+     global interaction the chrome adds. */
   (function () {
-    var root = document.documentElement;
-    var themeButton = document.getElementById("theme-toggle");
-    var navButton = document.getElementById("sidebar-toggle");
-    var sidebar = document.getElementById("primary-navigation");
-    if (themeButton) {
-      themeButton.addEventListener("click", function () {
-        var next = root.dataset.theme === "dark" ? "light" : "dark";
-        root.dataset.theme = next;
-        try { localStorage.setItem("apiary-theme", next); } catch (_) {}
+    var scrim = document.getElementById("palette-scrim");
+    var input = document.getElementById("palette-input");
+    var opener = document.getElementById("palette-open");
+    if (!scrim || !input) return;
+    var lastFocused = null;
+
+    function isTypingTarget(el) {
+      if (!el) return false;
+      var tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
+    function openPalette() {
+      if (!scrim.hidden) return;
+      lastFocused = document.activeElement;
+      scrim.hidden = false;
+      input.value = "";
+      input.focus();
+      // Ask for the unfiltered list so the palette is useful the
+      // moment it opens.
+      if (window.htmx) { htmx.ajax("GET", "/palette", { target: "#palette-results", swap: "innerHTML" }); }
+    }
+    function closePalette() {
+      if (scrim.hidden) return;
+      scrim.hidden = true;
+      if (lastFocused && lastFocused.focus) { lastFocused.focus(); }
+    }
+    function results() {
+      return Array.prototype.slice.call(scrim.querySelectorAll("#palette-results a"));
+    }
+    function moveSelection(delta) {
+      var items = results();
+      if (!items.length) return;
+      var current = items.findIndex(function (el) { return el.classList.contains("sel"); });
+      var next = current + delta;
+      if (next < 0) next = items.length - 1;
+      if (next >= items.length) next = 0;
+      items.forEach(function (el) { el.classList.remove("sel"); });
+      items[next].classList.add("sel");
+      items[next].scrollIntoView({ block: "nearest" });
+    }
+
+    if (opener) {
+      opener.addEventListener("click", openPalette);
+      opener.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPalette(); }
       });
     }
-    if (navButton && sidebar) {
-      navButton.addEventListener("click", function () {
-        var open = document.body.classList.toggle("nav-open");
-        navButton.setAttribute("aria-expanded", String(open));
-        navButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
-      });
-      sidebar.addEventListener("click", function (event) {
-        if (event.target.closest("a") && document.body.classList.contains("nav-open")) {
-          document.body.classList.remove("nav-open");
-          navButton.setAttribute("aria-expanded", "false");
-          navButton.setAttribute("aria-label", "Open navigation");
-        }
-      });
-      document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
-          document.body.classList.remove("nav-open");
-          navButton.setAttribute("aria-expanded", "false");
-          navButton.focus();
-        }
-      });
-    }
+    scrim.addEventListener("click", function (event) {
+      if (event.target === scrim) { closePalette(); }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "/" && scrim.hidden && !isTypingTarget(document.activeElement)) {
+        event.preventDefault();
+        openPalette();
+        return;
+      }
+      if (scrim.hidden) return;
+      if (event.key === "Escape") { event.preventDefault(); closePalette(); return; }
+      if (event.key === "ArrowDown") { event.preventDefault(); moveSelection(1); return; }
+      if (event.key === "ArrowUp") { event.preventDefault(); moveSelection(-1); return; }
+      if (event.key === "Enter") {
+        var items = results();
+        var current = items.findIndex(function (el) { return el.classList.contains("sel"); });
+        if (current >= 0) { event.preventDefault(); items[current].click(); }
+      }
+    });
+    // Focus trap: Tab stays inside the dialog while it is open.
+    scrim.addEventListener("keydown", function (event) {
+      if (event.key !== "Tab") return;
+      var focusable = scrim.querySelectorAll("input, a[href]");
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
   }());
 </script>
 <script>

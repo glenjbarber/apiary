@@ -63,18 +63,26 @@ func TestCommandCenterKeepsPreflightGuidance(t *testing.T) {
 	}
 }
 
-// TestCommandCenterHealthCardSpansTopGrid checks the layout half of
-// the change: with the second column panel gone, the colony status card
-// must occupy the full width of the top grid rather than leaving an
-// empty second column beside it.
-func TestCommandCenterHealthCardSpansTopGrid(t *testing.T) {
+// TestCommandCenterShowsTheColonyHealthSummary checks that the
+// overview still answers "is the Colony healthy?" directly.
+//
+// The old Command Center answered it with a HealthCard panel. The
+// Blend overview (the "Apiary: UI Redesign" handoff) replaces that
+// panel with a health CHIP in the top bar plus a status line, but the
+// QUESTION it answered is still answered - in the seven-state
+// vocabulary, and with a reachable count.
+func TestCommandCenterShowsTheColonyHealthSummary(t *testing.T) {
 	body := renderClusterOverview(t, &fakeClient{})
 
-	if !strings.Contains(body, `class="panel health-card"`) {
-		t.Fatal("command center does not render the health card at all")
+	if !strings.Contains(body, `class="chip `) {
+		t.Fatal("the overview does not render the Colony's health chip at all")
 	}
-	if !strings.Contains(body, "Combs reachable") {
-		t.Error("health card does not render its reachable count")
+	if !strings.Contains(body, "Combs") {
+		t.Error("the overview does not report the Combs count")
+	}
+	// The chip's own verdict is in words, not a colour alone.
+	if !strings.Contains(body, "Unknown") && !strings.Contains(body, "Healthy") && !strings.Contains(body, "Attention") {
+		t.Error("the health chip does not name its verdict in words")
 	}
 }
 
