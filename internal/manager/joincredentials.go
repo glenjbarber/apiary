@@ -58,9 +58,26 @@ func (s *Server) sealApprovedJoinCredentials(ctx context.Context, req *rpcpb.Get
 	if err != nil || leaderAddress != "" {
 		return nil, leaderAddress, err
 	}
+	// ADR-0174: the certificate integration rides the SAME bundle,
+	// and only for a Comb that was PREPARED FOR.
+	//
+	// A reservation is the request: a Comb with a prepared certificate
+	// waiting for it is a Comb that will need to renew one. A Comb
+	// with no reservation gets no credential, because provisioning a
+	// zone-scoped Cloudflare token to every Comb in a Colony would
+	// multiply the blast radius of a single compromise for no benefit.
+	integration, err := s.integrationForPreparedJoin(ctx, pending)
+	if err != nil {
+		return nil, "", err
+	}
+	bundleVersion := 1
+	if integration != nil {
+		bundleVersion = 2
+	}
 	bundle := joincredential.Bundle{
-		Version: 1, RequestID: pending.GetRequestId(), NodeID: pending.GetNodeId(),
+		Version: bundleVersion, RequestID: pending.GetRequestId(), NodeID: pending.GetNodeId(),
 		PeerAPIKey: key, RestartGuardrailToken: s.restartGuardrailToken,
+		Integration: integration,
 	}
 	plain, err := json.Marshal(bundle)
 	if err != nil {
