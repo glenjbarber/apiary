@@ -178,6 +178,10 @@ type fakeClient struct {
 	// jailCalls counts ListJails RPCs, for the same reason.
 	jailCalls int
 
+	// trustedPeersResp is the peer trust store's read side.
+	trustedPeersResp *rpcpb.ListTrustedPeersResponse
+	trustedPeersErr  error
+
 	// statusCalls counts Status RPCs so a test can assert the header's
 	// Colony-leader indicator (ADR-0123) does not cost a page a second
 	// Status call on pages that already fetched one.
@@ -882,9 +886,13 @@ func (f *fakeClient) UnpinPeerCertificate(_ context.Context, in *rpcpb.UnpinPeer
 	return &rpcpb.UnpinPeerCertificateResponse{}, nil
 }
 
-// The three ADR-0170 trust-transition calls. The frontend does not
-// use them - they are Admin-tier managerd acts with no page - so the
-// fake answers with an empty response.
+// ListTrustedPeers - the peer trust store's read side (ADR-0177).
+func (f *fakeClient) ListTrustedPeers(context.Context, *rpcpb.ListTrustedPeersRequest, ...grpc.CallOption) (*rpcpb.ListTrustedPeersResponse, error) {
+	return &rpcpb.ListTrustedPeersResponse{Peers: f.trustedPeersResp.GetPeers()}, f.trustedPeersErr
+}
+
+// TransitionPeerCertificate and its two companions - ADR-0170's
+// trust transition.
 func (f *fakeClient) TransitionPeerCertificate(context.Context, *rpcpb.TransitionPeerCertificateRequest, ...grpc.CallOption) (*rpcpb.TransitionPeerCertificateResponse, error) {
 	return &rpcpb.TransitionPeerCertificateResponse{}, nil
 }
@@ -897,6 +905,9 @@ func (f *fakeClient) AbandonPeerCertificateTransition(context.Context, *rpcpb.Ab
 	return &rpcpb.AbandonPeerCertificateTransitionResponse{}, nil
 }
 
+// The three ADR-0170 trust-transition calls. The frontend does not
+// use them - they are Admin-tier managerd acts with no page - so the
+// fake answers with an empty response.
 // The three ADR-0171 reservation calls. The frontend and the REST shim
 // do not expose them - they are managerd acts with no route - so the
 // fake answers with an empty response.

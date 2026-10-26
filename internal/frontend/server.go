@@ -71,6 +71,18 @@ type pageData struct {
 	// where a real per-Comb StateChip belongs instead.
 	KnownCombs []string
 
+	// TrustStore is ADR-0177's peer trust store: the Colony's pinned
+	// members and any transition in flight among them.
+	TrustStore trustStoreView
+
+	// TrustSuccess/TrustNodeID/TrustAction/TrustReason report the
+	// outcome of a transition attempt, so an operator who changed a
+	// Comb's trust knows whether the change took.
+	TrustSuccess string
+	TrustNodeID  string
+	TrustAction  string
+	TrustReason  string
+
 	// CombTree is the sidebar's Colony tree (ADR-0144's `CombTree`).
 	//
 	// It carries each Comb's MEMBERSHIP - suffrage, address, and
@@ -1362,6 +1374,16 @@ func (s *Server) routes() {
 	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	// ADR-0177's operator surface: the Colony's peer trust store, and
+	// the transition that replaces one of its certificates.
+	//
+	// The READ is Viewer, because seeing what the Colony trusts is not
+	// a privileged act - an operator who cannot see the trust store
+	// cannot reason about a transition they are being asked to
+	// authorize. The three WRITES are Admin, because they decide what
+	// the Colony trusts.
+	s.mux.HandleFunc("GET /machine/trust", s.requireRole(manager.RoleViewer, s.handleTrustStorePage))
+	s.mux.HandleFunc("POST /machine/trust/transition", s.requireRole(manager.RoleAdmin, s.handleTrustTransition))
 	// ADR-0163's guided join ledger: a two-column, READ-ONLY view of the
 	// two-way join handshake.
 	//

@@ -1,0 +1,111 @@
+{{define "trust_store_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Peer trust" "The certificates this Colony trusts, and any transition in flight.")}}
+
+    {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+    {{if .TrustSuccess}}<div class="success">{{.TrustSuccess}}</div>{{end}}
+
+    <div class="panel">
+      {{if .TrustStore.Empty}}
+        <p class="muted">{{.TrustStore.EmptyNote}}</p>
+      {{else}}
+        <p class="field-help">
+          Each Comb below is trusted by the certificate whose digest is shown.
+          A Comb with a <b>staged</b> certificate is trusted by BOTH certificates until the
+          overlap ends or you activate the new one - that is what makes the swap safe
+          whichever order it happens in.
+        </p>
+        <div class="table-scroll">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>Comb</th>
+                <th>Role</th>
+                <th>Trusted certificate</th>
+                <th>Expires</th>
+                <th>Staged certificate</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+            {{range .TrustStore.Rows}}
+              <tr>
+                <td>
+                  <a href="/host/{{.NodeID}}">{{if .CombName}}{{.CombName}}{{else}}{{.NodeID}}{{end}}</a>
+                  <div class="muted">{{.NodeID}}</div>
+                </td>
+                <td>
+                  {{if .IsVoter}}<span class="badge ok">Voter</span>{{else}}<span class="badge unknown">Nonvoter</span>{{end}}
+                </td>
+                <td><code>{{.Fingerprint}}</code></td>
+                <td>
+                  {{if .Expires}}<span class="badge {{.ExpiresClass}}">{{.Expires}}</span>{{else}}<span class="badge unknown">not recorded</span>{{end}}
+                </td>
+                <td>
+                  {{if .StagedFingerprint}}
+                    <code>{{.StagedFingerprint}}</code>
+                    {{if .StagedExpires}}<div><span class="badge {{.StagedExpiresClass}}">{{.StagedExpires}}</span></div>{{end}}
+                  {{else}}
+                    <span class="muted">none</span>
+                  {{end}}
+                </td>
+                <td>
+                  {{if .StagedFingerprint}}
+                    <form method="post" action="/machine/trust/transition" class="inline-form">
+                      <input type="hidden" name="node_id" value="{{.NodeID}}">
+                      <input type="hidden" name="action" value="activate">
+                      <input type="hidden" name="reason" value="operator activated the staged certificate">
+                      <button type="submit" class="button">Activate</button>
+                    </form>
+                    <form method="post" action="/machine/trust/transition" class="inline-form">
+                      <input type="hidden" name="node_id" value="{{.NodeID}}">
+                      <input type="hidden" name="action" value="abandon">
+                      <input type="hidden" name="reason" value="operator abandoned the staged certificate">
+                      <button type="submit" class="button secondary">Abandon</button>
+                    </form>
+                  {{else}}
+                    <form method="post" action="/machine/trust/transition" class="inline-form">
+                      <input type="hidden" name="node_id" value="{{.NodeID}}">
+                      <input type="hidden" name="action" value="stage">
+                      <label>Certificate file <input type="text" name="certificate_path" placeholder="/usr/local/etc/apiary/tls/cert.pem" required></label>
+                      <label>Reason <input type="text" name="reason" placeholder="why this certificate" required></label>
+                      <button type="submit" class="button">Stage</button>
+                    </form>
+                  {{end}}
+                </td>
+              </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{end}}
+    </div>
+
+    <div class="panel">
+      <h3>What a transition does</h3>
+      <p class="field-help">
+        <b>Stage</b> adds the incoming certificate beside the current one, and both are
+        trusted for the overlap. It is refused if the certificate does not pass the same
+        gate a pin does, and the fingerprint is re-derived from the certificate rather
+        than taken from what you typed.
+      </p>
+      <p class="field-help">
+        <b>Activate</b> promotes the staged certificate and drops the one it replaced.
+        <b>Abandon</b> drops the staged certificate and keeps the current one - which is
+        what you want when the incoming certificate turns out to be wrong.
+      </p>
+      <p class="field-help">
+        Each act records its reason in the Colony's log, so an incident review can answer
+        why a Comb's identity changed.
+      </p>
+    </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

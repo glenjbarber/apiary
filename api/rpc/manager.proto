@@ -902,6 +902,22 @@ service ManagerService {
   // Like PinPeerCertificate, none of these can create or modify an
   // authorization entry, and a pin is not a credential: nothing
   // authenticates a caller by presenting one.
+  // ListTrustedPeers is the READ side of ADR-0147 Part 4's replicated
+  // peer trust store, and the reason ADR-0177's operator surface can
+  // exist at all.
+  //
+  // It is COLONY-WIDE, unlike ListOriginCertificates and
+  // ListLetsEncryptCertificates, which answer only for the managerd
+  // that receives them: the trust store is raft-replicated, so every
+  // Comb's read of it is the same read. That is why it belongs on its
+  // own page rather than on the Certificates page, which has
+  // deliberately declared itself a single Comb's read-only view.
+  //
+  // It carries no private key and no key path, because the store holds
+  // none - the same reason internal/certmgr's check never opens a
+  // *.key file.
+  rpc ListTrustedPeers(ListTrustedPeersRequest) returns (ListTrustedPeersResponse);
+
   rpc TransitionPeerCertificate(TransitionPeerCertificateRequest) returns (TransitionPeerCertificateResponse);
   rpc ActivatePeerCertificateTransition(ActivatePeerCertificateTransitionRequest) returns (ActivatePeerCertificateTransitionResponse);
   rpc AbandonPeerCertificateTransition(AbandonPeerCertificateTransitionRequest) returns (AbandonPeerCertificateTransitionResponse);
@@ -4567,6 +4583,21 @@ message PinPeerCertificateRequest {
 }
 message PinPeerCertificateResponse {
   TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+// ListTrustedPeersRequest asks for the peer trust store.
+message ListTrustedPeersRequest {}
+
+// ListTrustedPeersResponse carries the peer trust store.
+//
+// The peers repeat the store's own message rather than flattening
+// it, for the same reason ListCertificateReservationsResponse does:
+// the raft-side schema and the one api/internalpb/state.proto owns
+// cannot drift apart.
+message ListTrustedPeersResponse {
+  repeated TrustedPeer peers = 1;
   string error = 2;
   string leader_hint = 3;
 }
