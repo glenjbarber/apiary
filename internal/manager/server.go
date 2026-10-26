@@ -227,6 +227,7 @@ type PeerForwarder interface {
 	// the same reason: they mutate replicated state.
 	PrepareCertificateReservation(ctx context.Context, addr string, req *rpcpb.PrepareCertificateReservationRequest) (*rpcpb.PrepareCertificateReservationResponse, error)
 	DropCertificateReservation(ctx context.Context, addr string, req *rpcpb.DropCertificateReservationRequest) (*rpcpb.DropCertificateReservationResponse, error)
+	IssuePreparedCertificate(ctx context.Context, addr string, req *rpcpb.IssuePreparedCertificateRequest) (*rpcpb.IssuePreparedCertificateResponse, error)
 	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
 
 	// CancelJoinRequest/PurgeJoinRequest mirror RequestJoinColony/

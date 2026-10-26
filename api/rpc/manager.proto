@@ -926,6 +926,24 @@ service ManagerService {
   rpc ListCertificateReservations(ListCertificateReservationsRequest) returns (ListCertificateReservationsResponse);
   rpc DropCertificateReservation(DropCertificateReservationRequest) returns (DropCertificateReservationResponse);
 
+  // IssuePreparedCertificate issues a certificate for a Comb that has
+  // NOT joined yet, and records it as a reservation the join flow will
+  // deliver.
+  //
+  // It is a separate call from IssueLetsEncryptCertificate because
+  // that one is welded to THIS Comb's serving certificate paths: it
+  // installs the pair where managerd already serves from, and refuses
+  // a name that does not match. A certificate for another Comb must go
+  // somewhere else, and must not disturb this Comb's own serving
+  // certificate.
+  //
+  // The private key is generated HERE, on the preparing Comb, because
+  // the joining Comb does not exist yet - which is the whole reason
+  // the prepared mode exists. That makes the key a secret with two
+  // holders until the joiner replaces it with one of its own, and the
+  // caller is told so.
+  rpc IssuePreparedCertificate(IssuePreparedCertificateRequest) returns (IssuePreparedCertificateResponse);
+
   // PreflightApproveJoinRequest previews ApproveJoinRequest's own
   // reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
   // Admin-tier, not Viewer, because it makes managerd dial a
@@ -4628,6 +4646,33 @@ message PrepareCertificateReservationResponse {
   CertificateReservation reservation = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// IssuePreparedCertificateRequest asks for a certificate to be issued
+// for a Comb that has not joined yet.
+message IssuePreparedCertificateRequest {
+  // fqdn is the name the certificate is issued for. It is checked
+  // against the saved integration's allowed suffix before anything is
+  // requested.
+  string fqdn = 1;
+
+  // reservation_id is the operator's identifier for this preparation.
+  // It must be unguessable, because it is what the joining Comb
+  // presents to collect the material.
+  string reservation_id = 2;
+
+  // validity_seconds is how long the preparation stays deliverable.
+  int64 validity_seconds = 3;
+}
+
+message IssuePreparedCertificateResponse {
+  CertificateReservation reservation = 1;
+  string error = 2;
+  string leader_hint = 3;
+  // bootstrap_key_warning tells the caller what the prepared mode
+  // costs, in the caller's own words, so it can be shown rather than
+  // assumed.
+  string bootstrap_key_warning = 4;
 }
 
 message ListCertificateReservationsRequest {}

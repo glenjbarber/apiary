@@ -325,7 +325,21 @@ type Config struct {
 
 	// AcmeEmail is an optional contact address passed at ACME account
 	// registration. Let's Encrypt does not require one.
-	AcmeEmail          string        `json:"acme_email,omitempty"`
+	AcmeEmail string `json:"acme_email,omitempty"`
+
+	// PreparedCertificateSuffix is the naming suffix this Comb's
+	// Cloudflare integration may issue certificates for (ADR-0172).
+	//
+	// It is what stops the saved integration from issuing for a name
+	// the operator never meant to give this Colony, and it is checked
+	// BEFORE anything is requested, so a typo costs nothing.
+	//
+	// Empty means no suffix is set, and an issuance with no suffix is
+	// REFUSED rather than treated as a wildcard: a wildcard would let
+	// the integration issue for any name in the zone, which is
+	// exactly the consequence the suffix exists to bound.
+	PreparedCertificateSuffix string `json:"prepared_certificate_suffix,omitempty"`
+
 	WatchgooseEnabled  bool          `json:"watchgoose_enabled,omitempty"`
 	WatchgooseEndpoint string        `json:"watchgoose_endpoint,omitempty"`
 	WatchgooseInterval time.Duration `json:"watchgoose_interval,omitempty"`

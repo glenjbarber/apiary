@@ -716,6 +716,16 @@ type NodeConfigRecord struct {
 	OriginCATokenFile               string `json:"origin_ca_token_file,omitempty"`
 	OriginCADirectory               string `json:"origin_ca_directory,omitempty"`
 
+	// PreparedCertificateSuffix is the naming suffix this Comb's
+	// Cloudflare integration may issue certificates for (ADR-0172).
+	//
+	// It is a PUBLIC setting, on the same reasoning as
+	// CloudflareZoneID: it names a domain suffix, and it constrains
+	// what may be issued rather than enabling it. The credential it
+	// applies to is the token file above, and THAT is the path whose
+	// contents are secret.
+	PreparedCertificateSuffix string `json:"prepared_certificate_suffix,omitempty"`
+
 	OriginCARenewalCheckInterval string `json:"origin_ca_renewal_check_interval,omitempty"`
 
 	// AcmeAccountKeyFile is a path, same reasoning as TLSKey above: the
@@ -797,6 +807,7 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 
 		CloudflareTokenFile:             cfg.CloudflareTokenFile,
 		CloudflareZoneID:                cfg.CloudflareZoneID,
+		PreparedCertificateSuffix:       cfg.PreparedCertificateSuffix,
 		CloudflareTunnelID:              cfg.CloudflareTunnelID,
 		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
 		OriginCATokenFile:               cfg.OriginCATokenFile,

@@ -134,6 +134,7 @@ const (
 	ManagerService_PrepareCertificateReservation_FullMethodName       = "/apiary.rpc.v1.ManagerService/PrepareCertificateReservation"
 	ManagerService_ListCertificateReservations_FullMethodName         = "/apiary.rpc.v1.ManagerService/ListCertificateReservations"
 	ManagerService_DropCertificateReservation_FullMethodName          = "/apiary.rpc.v1.ManagerService/DropCertificateReservation"
+	ManagerService_IssuePreparedCertificate_FullMethodName            = "/apiary.rpc.v1.ManagerService/IssuePreparedCertificate"
 	ManagerService_PreflightApproveJoinRequest_FullMethodName         = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName                    = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
@@ -1007,6 +1008,23 @@ type ManagerServiceClient interface {
 	PrepareCertificateReservation(ctx context.Context, in *PrepareCertificateReservationRequest, opts ...grpc.CallOption) (*PrepareCertificateReservationResponse, error)
 	ListCertificateReservations(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error)
 	DropCertificateReservation(ctx context.Context, in *DropCertificateReservationRequest, opts ...grpc.CallOption) (*DropCertificateReservationResponse, error)
+	// IssuePreparedCertificate issues a certificate for a Comb that has
+	// NOT joined yet, and records it as a reservation the join flow will
+	// deliver.
+	//
+	// It is a separate call from IssueLetsEncryptCertificate because
+	// that one is welded to THIS Comb's serving certificate paths: it
+	// installs the pair where managerd already serves from, and refuses
+	// a name that does not match. A certificate for another Comb must go
+	// somewhere else, and must not disturb this Comb's own serving
+	// certificate.
+	//
+	// The private key is generated HERE, on the preparing Comb, because
+	// the joining Comb does not exist yet - which is the whole reason
+	// the prepared mode exists. That makes the key a secret with two
+	// holders until the joiner replaces it with one of its own, and the
+	// caller is told so.
+	IssuePreparedCertificate(ctx context.Context, in *IssuePreparedCertificateRequest, opts ...grpc.CallOption) (*IssuePreparedCertificateResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -2280,6 +2298,16 @@ func (c *managerServiceClient) DropCertificateReservation(ctx context.Context, i
 	return out, nil
 }
 
+func (c *managerServiceClient) IssuePreparedCertificate(ctx context.Context, in *IssuePreparedCertificateRequest, opts ...grpc.CallOption) (*IssuePreparedCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssuePreparedCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_IssuePreparedCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PreflightApproveJoinRequestResponse)
@@ -3241,6 +3269,23 @@ type ManagerServiceServer interface {
 	PrepareCertificateReservation(context.Context, *PrepareCertificateReservationRequest) (*PrepareCertificateReservationResponse, error)
 	ListCertificateReservations(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error)
 	DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error)
+	// IssuePreparedCertificate issues a certificate for a Comb that has
+	// NOT joined yet, and records it as a reservation the join flow will
+	// deliver.
+	//
+	// It is a separate call from IssueLetsEncryptCertificate because
+	// that one is welded to THIS Comb's serving certificate paths: it
+	// installs the pair where managerd already serves from, and refuses
+	// a name that does not match. A certificate for another Comb must go
+	// somewhere else, and must not disturb this Comb's own serving
+	// certificate.
+	//
+	// The private key is generated HERE, on the preparing Comb, because
+	// the joining Comb does not exist yet - which is the whole reason
+	// the prepared mode exists. That makes the key a secret with two
+	// holders until the joiner replaces it with one of its own, and the
+	// caller is told so.
+	IssuePreparedCertificate(context.Context, *IssuePreparedCertificateRequest) (*IssuePreparedCertificateResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -3696,6 +3741,9 @@ func (UnimplementedManagerServiceServer) ListCertificateReservations(context.Con
 }
 func (UnimplementedManagerServiceServer) DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DropCertificateReservation not implemented")
+}
+func (UnimplementedManagerServiceServer) IssuePreparedCertificate(context.Context, *IssuePreparedCertificateRequest) (*IssuePreparedCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssuePreparedCertificate not implemented")
 }
 func (UnimplementedManagerServiceServer) PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightApproveJoinRequest not implemented")
@@ -5774,6 +5822,24 @@ func _ManagerService_DropCertificateReservation_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_IssuePreparedCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssuePreparedCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).IssuePreparedCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_IssuePreparedCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).IssuePreparedCertificate(ctx, req.(*IssuePreparedCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_PreflightApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PreflightApproveJoinRequestRequest)
 	if err := dec(in); err != nil {
@@ -6404,6 +6470,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropCertificateReservation",
 			Handler:    _ManagerService_DropCertificateReservation_Handler,
+		},
+		{
+			MethodName: "IssuePreparedCertificate",
+			Handler:    _ManagerService_IssuePreparedCertificate_Handler,
 		},
 		{
 			MethodName: "PreflightApproveJoinRequest",
