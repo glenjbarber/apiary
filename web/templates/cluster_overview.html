@@ -12,9 +12,15 @@
       (handoff section 7), in that order.
 
       Each of the three is a fragment with its own polling route, so a
-      refresh of one does not rebuild the others. The comb view's
-      fragment is swapped into the same target the segmented control
-      swaps, so the selected view survives a refresh.
+      refresh of one does not rebuild the others.
+
+      Every polling element REPLACES itself (hx-swap="outerHTML"), and
+      where its route returns more than the element, hx-select picks
+      the element back out by id. Filling itself instead (innerHTML)
+      put a whole new copy of the section, heading and wrapper
+      included, inside the old one on every refresh: a second "Needs
+      attention" heading inside the box, a second padded status line,
+      and a second Combs heading and view switch.
     */}}
     {{template "overview_status" .}}
     {{template "overview_attention" .}}
@@ -59,7 +65,7 @@
 */}}
 {{define "overview_status"}}
 <div class="ov-status{{if .Overview.Status.Stale}} is-stale{{end}}" id="ov-status"
-     hx-get="/overview/status" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-swap="innerHTML">
+     hx-get="/overview/status" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-swap="outerHTML">
   {{if .Overview.Status.Stale}}<span class="ov-stale-note" role="status">{{.Overview.Status.StaleDetail}}</span>{{end}}
   {{range .Overview.Status.Metrics}}<span class="ov-metric{{if .Warn}} is-warn{{end}}"><span class="ov-metric-label">{{.Label}}</span>
     {{if .Known}}<b class="ov-metric-value"{{if .Detail}} title="{{.Detail}}"{{end}}>{{.Value}}</b>{{else}}<b class="ov-metric-value is-unknown"{{if .Detail}} title="{{.Detail}}"{{end}}>unknown</b>{{end}}
@@ -80,7 +86,7 @@
 <section class="ov-section" aria-labelledby="ov-attention-title">
   <div class="ov-section-head"><h2 id="ov-attention-title">Needs attention</h2></div>
   <div class="ov-attention" id="ov-attention"
-       hx-get="/overview/attention" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-swap="innerHTML">
+       hx-get="/overview/attention" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-select="#ov-attention" hx-swap="outerHTML">
     {{if .Overview.Attention}}
     {{range .Overview.Attention}}<div class="ov-attention-row">
       <i class="dot {{.State}}" title="{{.State}}" aria-hidden="true"></i><span class="visually-hidden">{{.State}}</span>
@@ -98,12 +104,12 @@
   The Combs section (handoff 7.4), in its three views.
 
   The segmented control is three buttons with aria-pressed. With
-  JavaScript, each button issues an hx-get that swaps ONLY this
-  section. Without JavaScript, each button is also a plain link to
+  JavaScript, each button issues an hx-get that replaces ONLY this
+  section, so the pressed button and the body change together. Without JavaScript, each button is also a plain link to
   "/?combview=...", which renders the full page with that view.
 */}}
 {{define "overview_combs"}}
-<section class="ov-section" aria-labelledby="ov-combs-title">
+<section class="ov-section" id="ov-combs" aria-labelledby="ov-combs-title">
   {{/*
     The colony-wide FSM state agreement verdict (ADR-0143), carried
     over from the Command Center. It is a fact about the whole set of
@@ -117,12 +123,12 @@
     <div class="ov-segmented" role="group" aria-label="Comb view">
       {{$view := .CombView}}{{$combs := .Overview.Combs}}
       {{range $v := (combViewNames)}}<a class="ov-seg{{if eq $v $view}} active{{end}}" href="/?combview={{$v}}"
-        hx-get="/overview/combs?view={{$v}}" hx-target="#ov-combs-body" hx-swap="innerHTML"
+        hx-get="/overview/combs?view={{$v}}" hx-target="#ov-combs" hx-select="#ov-combs" hx-swap="outerHTML"
         hx-push-url="false" role="button" aria-pressed="{{if eq $v $view}}true{{else}}false{{end}}">{{combViewLabel $v}}</a>{{end}}
     </div>
   </div>
   <div id="ov-combs-body"
-       hx-get="/overview/combs?view={{.CombView}}" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-swap="innerHTML">
+       hx-get="/overview/combs?view={{.CombView}}" hx-trigger="every 10s [document.visibilityState === 'visible']" hx-select="#ov-combs-body" hx-swap="outerHTML">
     {{template "overview_combs_body" .}}
   </div>
 </section>
