@@ -4,7 +4,17 @@
 
 Proposed. This record documents the current implementation and proposes the product and security boundary for issue #26.
 
-**Interoperability verified 2026-10-25; deployment not.** The "not verified" this status line used to carry for interoperability is now settled: `scripts/check-mcp-interop.sh` starts a stub managerd, starts the real `apiary-mcp` against it, and drives it with **orcli's real MCP client** over both transports - stdio (a local client) and Streamable HTTP (a remote client). Both pass: the server answers initialize, orcli can list the tools, the tool set is the three read-only ones, and every tool arrives annotated read-only. What is still not verified is **deployment** - the connector's own record of where it is installed and how an operator enables it was only made real by the change that followed this one, and its use in a production Colony has not been exercised.
+**Interoperability verified 2026-10-25; deployment verified 2026-10-26.** The "not verified" this status line used to carry for interoperability is now settled: `scripts/check-mcp-interop.sh` starts a stub managerd, starts the real `apiary-mcp` against it, and drives it with **orcli's real MCP client** over both transports - stdio (a local client) and Streamable HTTP (a remote client). Both pass: the server answers initialize, orcli can list the tools, the tool set is the three read-only ones, and every tool arrives annotated read-only.
+
+**Deployment is now verified too**, on a real host, against the installed service rather than a build in a tree. The connector is installed at `/usr/local/libexec/apiary/apiary-mcp` with an rc.d script at `/usr/local/etc/rc.d/apiary_mcp`; `service apiary_mcp onestart` starts it, it listens on loopback at `127.0.0.1:8787/mcp`, a real MCP `initialize` returns its capabilities and its model-agnostic instructions, an unauthenticated request and a request with a wrong bearer token are both refused with **HTTP 401**, and the tools list arrives with all three tools annotated `ReadOnlyHint` and `OpenWorldHint`.
+
+Two things that verification confirmed about the design, and which are worth recording because they are the shape of the deployment rather than incidental detail:
+
+  - **The service refuses to start on a weak bearer token.** `APIARY_MCP_TOKEN` must be at least 32 characters, and the service names that reason and exits rather than starting with a short token. This was observed directly: a deliberately short test token was refused with exactly that message, and the service only came up once the token met the rule.
+
+  - **The secrets file is the deployment's own contract.** `/usr/local/etc/apiary/mcp-secrets` is mode 0600 and root-owned, and the rc script reads it with a plain read loop rather than sourcing it. The connector still refuses to start with a named reason when the file is absent.
+
+The connector has NOT been exercised against a production Colony: the verification above used a test API key, and the tool calls themselves were made against the live service rather than against a running Apiary. What remains of issue #26 is orcli's client work, which is tracked in the other repository.
 
 Supersedes: None
 Superseded by: None
