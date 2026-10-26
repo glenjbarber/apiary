@@ -2,16 +2,20 @@
 
 ## Status
 
-Accepted and implemented. All six sections (A-F) are in `main`, each
-delivered as its own commit. A is the design-system primitives
-(`internal/frontend/gauge.go`, `internal/frontend/health_card.go`,
-`web/templates/_gauge.html`, `web/templates/_health_card.html`, the
-six `--status-*` tokens and the Comb tree in
-`web/templates/layout.html`). B is the creation wizard
-(`web/templates/create_guided.html`), with `placementUnavailable`
-applied as `disabled` on the owner-node `<option>` itself, which is
-the gap this ADR was written to close. C is the dashboard
-`HealthCard` and per-node gauges (`web/templates/cluster_overview.html`,
+Accepted. Sections A, C, D, E and F are implemented and in `main`.
+**Sections A's `CombTree` and B's wizard were NOT** - see ADR-0176 for
+the accounting and for what was delivered instead.
+
+A is the design-system primitives (`internal/frontend/gauge.go`,
+`internal/frontend/health_card.go`,
+`web/templates/_gauge.html`, `web/templates/_health_card.html` and the
+six `--status-*` tokens), plus the sidebar's Colony tree
+(`internal/frontend/combtree.go`), which ADR-0176 delivered. B's
+`placementUnavailable` is applied as `disabled` on the owner-node
+`<option>` itself, which was the gap this ADR was written to close -
+but the wizard's multi-pane SHAPE is still the single-page
+implementation, also per ADR-0176. C is the dashboard `HealthCard` and
+per-node gauges (`web/templates/cluster_overview.html`,
 `internal/frontend/cluster_overview.go`). D is the image-kind labels
 and bridge-health chips (`web/templates/images.html`,
 `web/templates/networks.html`). E is the service-status and role chips
@@ -20,6 +24,14 @@ and bridge-health chips (`web/templates/images.html`,
 (`web/templates/simulate.html`,
 `web/templates/assumption_register.html`,
 `web/templates/recovery_handbook.html`).
+
+The earlier revision of this status line said "Accepted and
+implemented. All six sections (A-F) are in `main`", and the companion
+spec `docs/web-ui-redesign.md` said the opposite at its own top -
+"awaiting review before any code changes". Both were partly true and
+neither was usable: one overstated what was built and the other
+understated it. They are now brought into agreement with each other
+and with the tree.
 
 Two points where the code settled differently from the design text
 below, each recorded in its own delivery commit rather than here.

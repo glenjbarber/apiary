@@ -151,6 +151,15 @@
     .sidebar-link { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
     .sidebar-link:hover { color:#fff; background:var(--sidebar-hover); }
     .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
+    /* The sidebar's Colony tree (ADR-0144's CombTree). A Comb, its
+       suffrage, and the cells it owns, nested one level apart. */
+    .sidebar-tree { list-style:none; margin:0; padding:0; }
+    .sidebar-tree-item { margin:.1rem 0 .35rem; }
+    .sidebar-tree-cells { list-style:none; margin:.12rem 0 .1rem .8rem; padding:0 0 0 .45rem; border-left:1px solid var(--sidebar-rule); }
+    .sidebar-tree-cells .sidebar-link { padding:.22rem .5rem; font-size:.8rem; color:var(--sidebar-muted); }
+    .sidebar-tree-cells .sidebar-link:hover { color:#fff; }
+    .sidebar-tree-item .badge { margin-left:.35rem; vertical-align:middle; }
+    .sidebar-note { margin:.45rem .65rem .1rem; color:var(--sidebar-muted); font-size:.66rem; line-height:1.35; }
     .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
     .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
@@ -211,6 +220,13 @@
     .badge.stopped { color:var(--muted); background:var(--table-head); }
     :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded, :root[data-theme="dark"] .badge.restarting, :root[data-theme="dark"] .badge.soon, :root[data-theme="dark"] .badge.warn { background:#493b11; }
     .badge.unknown { color:var(--status-unknown); background:var(--table-head); }
+    /* A leader badge marks an OBSERVED leader (ADR-0123) - an
+       unobserved reading never renders one. */
+    .badge.badge-leader { color:#111; background:var(--yellow); }
+    /* A suffrage badge is MEMBERSHIP, not a health verdict, so it is
+       deliberately neutral: colouring it would imply a health claim
+       the sidebar did not make. */
+    .badge.badge-suffrage { color:var(--sidebar-muted); background:transparent; border:1px solid var(--sidebar-rule); font-weight:600; }
     .badge.not-applicable { color:var(--status-not-applicable); background:color-mix(in srgb, var(--status-not-applicable) 17%, var(--panel)); }
     .badge.stale { opacity:.65; border:1px dashed var(--status-stale); }
     .badge.contradictory { color:#fff; background:var(--status-critical); }
@@ -531,10 +547,24 @@
       <a class="sidebar-link{{if eq .ActivePage "resilience-coverage"}} active{{end}}" href="/resilience-coverage"{{if eq .ActivePage "resilience-coverage"}} aria-current="page"{{end}}>Coverage Map</a>
       <a class="sidebar-link{{if eq .ActivePage "certificates"}} active{{end}}" href="/certificates"{{if eq .ActivePage "certificates"}} aria-current="page"{{end}}>Certificates</a>
     </section>
-    {{if .KnownCombs}}
+    {{if .CombTree.Combs}}
     <section class="sidebar-section" aria-labelledby="nav-combs">
       <h2 class="sidebar-heading" id="nav-combs">Combs</h2>
-      {{range .KnownCombs}}<a class="sidebar-link comb-link" href="/host/{{.}}" title="Comb detail and evidence for {{.}}">{{.}}</a>{{end}}
+      <ul class="sidebar-tree combs">
+        {{range .CombTree.Combs}}
+        <li class="sidebar-tree-item">
+          <a class="sidebar-link comb-link" href="/host/{{.NodeID}}" title="{{.NodeID}} - raft membership and evidence{{if .Address}} at {{.Address}}{{end}}">{{.NodeID}}</a>
+          {{if .IsLeader}}<span class="badge badge-leader" title="This Comb currently holds raft leadership">leader</span>{{end}}
+          {{if .Suffrage}}<span class="badge badge-suffrage" title="Raft suffrage. This is MEMBERSHIP, not a health verdict - the Comb's own health is on its detail page.">{{.Suffrage}}</span>{{end}}
+          {{if .Cells}}
+          <ul class="sidebar-tree-cells">
+            {{range .Cells}}<li><a class="sidebar-link cell-link" href="{{.Href}}" title="{{.Type}} {{.ID}}{{if .Name}} - {{.Name}}{{end}}">{{.ID}}</a></li>{{end}}
+          </ul>
+          {{end}}
+        </li>
+        {{end}}
+      </ul>
+      <p class="sidebar-note">Membership, not health. A Comb's own verdict is on its page.</p>
     </section>
     {{end}}
   </nav>

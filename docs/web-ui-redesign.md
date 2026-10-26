@@ -5,9 +5,12 @@ records the decision this spec implements. Read that first for the
 "why"; this document is the "how," at the level of detail a build
 session needs without re-deriving it from the templates each time.
 
-Status: **Proposed** - first checkpoint (this document) awaiting
-review before any code changes. Sections 4 and 6 double as the phased
-delivery plan: each lettered section (A-F) is one review checkpoint.
+Status: **Superseded in part by implementation.** Sections A, C, D, E
+and F are in `main`. Section A's `CombTree` and Section B's multi-pane
+wizard were not, and ADR-0176 records what was delivered instead and
+why. The design text below is unchanged - it remains the record of what
+was decided - but where it and the tree disagree, ADR-0144 and
+ADR-0176 say which is true.
 
 ## Ground truth this spec is built from
 

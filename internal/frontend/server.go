@@ -71,6 +71,19 @@ type pageData struct {
 	// where a real per-Comb StateChip belongs instead.
 	KnownCombs []string
 
+	// CombTree is the sidebar's Colony tree (ADR-0144's `CombTree`).
+	//
+	// It carries each Comb's MEMBERSHIP - suffrage, address, and
+	// whether it is the observed leader - plus the cells that Comb
+	// owns. It deliberately does NOT carry a per-Comb health verdict:
+	// that would cost one HostStats probe AND one peer Status per
+	// Comb on every page view across the whole app, and the page that
+	// answers "is this Comb healthy?" is /host/{id}, one click away.
+	//
+	// Empty when the status could not be read, so a managerd that
+	// cannot reach raft renders no tree rather than a broken one.
+	CombTree combTreeView
+
 	// ActiveMachineSection names the current page's slug ("operations",
 	// "networking", ...) among the focused per-subsystem Machine pages
 	// (machineSections in machine.go), so machine_section_nav can
@@ -1051,6 +1064,10 @@ func (s *Server) withAuthFieldsFrom(r *http.Request, pd pageData, status *rpcpb.
 		combs := append([]string(nil), status.GetKnownNodeIds()...)
 		sort.Strings(combs)
 		pd.KnownCombs = combs
+		// The tree is gathered from the SAME status the page render
+		// already made, so it costs no extra Status call. The cell
+		// lists are one read each, shared across every Comb.
+		pd.CombTree = s.gatherCombTree(r.Context(), status)
 	}
 	return pd
 }
