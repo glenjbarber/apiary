@@ -43,6 +43,7 @@
   "pam_service": "",
   "cloudflare_token_file": "",
   "cloudflare_zone_id": "",
+  "prepared_certificate_suffix": "",
   "cloudflare_tunnel_id": "",
   "cloudflare_tunnel_credentials_file": "",
   "origin_ca_token_file": "",
