@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glenjbarber/apiary/internal/certintegration"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/hostcert"
 	"github.com/glenjbarber/apiary/internal/joincredential"
@@ -58,6 +59,21 @@ func installApprovedJoinCredentials(envelope []byte, servingCert *localCertifica
 	if block == nil || hostcert.Fingerprint(block.Bytes) != servingCert.fingerprint {
 		return errors.New("local serving certificate changed during join credential installation")
 	}
+	// ADR-0174: the certificate integration is installed BEFORE the
+	// credentials, so that a Comb which was prepared for has its
+	// integration in place by the time it needs it - and so that a
+	// refusal to install it (an existing token, say) is reported
+	// before anything else has been changed.
+	//
+	// The integration is installed FIRST because it is the thing that
+	// can fail on its own terms. The credentials below are the
+	// Colony's, and installing them is the more important half.
+	if bundle.Integration != nil {
+		if err := certintegration.Install(bundle.Integration, managerConfigPath); err != nil {
+			return fmt.Errorf("installing the provisioned certificate integration: %w", err)
+		}
+	}
+
 	if err := installJoinCredentialBundle(bundle, managerConfigPath, frontendconfig.DefaultPath, defaultRestartGuardrailTokenPath); err != nil {
 		return err
 	}
@@ -73,8 +89,15 @@ func installApprovedJoinCredentials(envelope []byte, servingCert *localCertifica
 // Existing API keys are preserved. An existing guardrail token must match the
 // Colony token exactly; a mismatch is never repaired by overwriting it.
 func installJoinCredentialBundle(bundle joincredential.Bundle, managerConfigPath, frontendConfigPath, tokenPath string) error {
-	if bundle.Version != 1 || bundle.RequestID == "" || bundle.NodeID == "" || bundle.PeerAPIKey == "" || bundle.RestartGuardrailToken == "" {
-		return errors.New("credential bundle is incomplete or uses an unsupported version")
+	// Version 1 carries the Colony's peer credentials. Version 2 adds
+	// the certificate integration (ADR-0174), for a Comb that was
+	// prepared for. A version outside those two is refused rather
+	// than half-read.
+	if bundle.Version != 1 && bundle.Version != 2 {
+		return fmt.Errorf("credential bundle uses an unsupported version %d", bundle.Version)
+	}
+	if bundle.RequestID == "" || bundle.NodeID == "" || bundle.PeerAPIKey == "" || bundle.RestartGuardrailToken == "" {
+		return errors.New("credential bundle is incomplete")
 	}
 	nodeManager := &nodeconfig.Manager{Path: managerConfigPath}
 	nodeCfg, err := nodeManager.Load()

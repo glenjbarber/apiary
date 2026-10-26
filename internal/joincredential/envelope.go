@@ -37,12 +37,67 @@ type Envelope struct {
 
 // Bundle is the plaintext payload sealed inside an Envelope. Callers should
 // keep it only in memory and must never log or persist it as a Raft value.
+//
+// The version is 1 or 2. Version 1 carries the Colony's peer
+// credentials and nothing else. Version 2 adds the certificate
+// INTEGRATION - the Cloudflare token and the public settings that go
+// with it - for a joining Comb that was prepared for.
+//
+// A joiner that only understands version 1 reads what it understands
+// and ignores the rest, which is what the version is for.
 type Bundle struct {
 	Version               int    `json:"version"`
 	RequestID             string `json:"request_id"`
 	NodeID                string `json:"node_id"`
 	PeerAPIKey            string `json:"peer_api_key"`
 	RestartGuardrailToken string `json:"restart_guardrail_token"`
+
+	// Integration is the certificate integration provisioned to this
+	// Comb (ADR-0174).
+	//
+	// It is EMPTY for a Comb that was not prepared for. Most Combs
+	// never issue a certificate, and provisioning a zone-scoped
+	// Cloudflare credential to every one of them would multiply the
+	// blast radius of a single compromise for no benefit.
+	Integration *Integration `json:"integration,omitempty"`
+}
+
+// Integration is the certificate integration provisioned to a joining
+// Comb.
+//
+// The token is a SHARED SECRET: a zone-scoped Cloudflare token can
+// change what every host in that zone resolves to. It is carried only
+// to a Comb that was prepared for, and it is written to a 0600
+// root-owned file on arrival.
+//
+// The rest is public: the zone, the suffix, and the ACME account's
+// settings. They are what the joining Comb's own configuration needs
+// to reference, and they are not secret.
+type Integration struct {
+	// CloudflareToken is the zone-scoped API token. It is the secret
+	// half.
+	CloudflareToken string `json:"cloudflare_token,omitempty"`
+	// CloudflareZoneID is the zone the token is scoped to.
+	CloudflareZoneID string `json:"cloudflare_zone_id,omitempty"`
+	// CloudflareZoneName is that zone's human name, for an operator
+	// reading the joiner's configuration.
+	CloudflareZoneName string `json:"cloudflare_zone_name,omitempty"`
+	// AllowedSuffix is the naming suffix this integration may issue
+	// for. It is what stops the integration issuing for a name the
+	// operator did not mean to give this Colony.
+	AllowedSuffix string `json:"allowed_suffix,omitempty"`
+	// ACMEDirectory is where the joining Comb keeps its certificates.
+	ACMEDirectory string `json:"acme_directory,omitempty"`
+	// ACMEAccountKeyFile is where the joining Comb's own ACME account
+	// key lives. It names a file; the key itself is generated on the
+	// joiner and never travels.
+	ACMEAccountKeyFile string `json:"acme_account_key_file,omitempty"`
+	// ACMEDirectoryURL is the ACME server. Empty means Let's
+	// Encrypt's production directory.
+	ACMEDirectoryURL string `json:"acme_directory_url,omitempty"`
+	// ACMEEmail is the contact address registered with the ACME
+	// account.
+	ACMEEmail string `json:"acme_email,omitempty"`
 }
 
 // Seal encrypts plaintext to the public key in certificatePEM. aad must bind
