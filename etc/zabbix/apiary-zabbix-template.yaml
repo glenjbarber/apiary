@@ -1,0 +1,345 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 8f2c1a4b6d3e4f5a9b7c2d1e0f3a5b6c
+      name: 'Templates/Apiary'
+  templates:
+    - uuid: 3e9a7c5b2d1f4e6a8b0c2d4e6f8a0b2c
+      template: 'Apiary'
+      name: 'Apiary'
+      description: |
+        Read-only monitoring of an Apiary Colony, through the Apiary REST
+        monitoring endpoints (ADR-0160). Zabbix pulls; Apiary never pushes.
+
+        Every item here is a READ. Nothing in this template changes Apiary
+        state, and no item may be pointed at a mutating endpoint.
+
+        The credential is a dedicated Viewer-scoped Apiary API key, held in
+        {$APIARY.API_KEY} - a Zabbix secret macro, or whatever secret store
+        the deployment uses. It is never written into an item key, a URL, or
+        a log. To rotate: create a replacement Viewer key, update the
+        secret, confirm the reads still work, then revoke the old key.
+
+        Apiary stores no Zabbix credential of any kind.
+
+        A missing or unreachable observation is reported as UNAVAILABLE,
+        never coerced to a healthy value or to zero. The API already
+        omits a measurement that was not taken rather than rendering it as
+        zero, and this template preserves that: a dependent item whose
+        value is absent produces no value, which Zabbix records as
+        unsupported rather than as 0.
+      groups:
+        - name: 'Templates/Apiary'
+      items:
+        # The whole Colony's report, fetched once and used as the master
+        # for every per-node item below. One request per interval for
+        # the entire Colony, rather than one per node.
+        - uuid: 7b4e2d6a8c0f4a1b3d5e7f9a1b3c5d7e
+          name: 'Apiary: cluster report'
+          type: HTTP_AGENT
+          key: 'apiary.cluster.report'
+          url: '{$APIARY.URL}/v1/monitoring/health'
+          headers:
+            - name: 'Authorization'
+              value: 'Bearer {$APIARY.API_KEY}'
+          output_format: JSON
+          delay: '{$APIARY.INTERVAL}'
+          timeout: '10s'
+          verify_peer: '1'
+          verify_host: '1'
+          history: 7d
+          trends: '0'
+          value_type: TEXT
+          description: |
+            The Colony's monitoring report: its verdict, and one row per
+            Comb. This is the master item - every per-node item below is a
+            dependent item reading from it, so the Colony is polled once
+            per interval however many Combs it has.
+          tags:
+            - tag: Application
+              value: 'Apiary'
+            - tag: component
+              value: cluster
+
+        # The Colony's verdict, extracted from the report.
+        - uuid: 2c8e4a6b0d2f4e6a8c0e2f4a6b8d0e2f
+          name: 'Apiary: cluster health status'
+          type: DEPENDENT
+          key: 'apiary.cluster.health.status'
+          delay: '0'
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.health.status'
+          master_item:
+            key: 'apiary.cluster.report'
+          description: |
+            The Colony's health verdict: healthy, degraded, unknown, stale
+            or contradictory.
+
+            An empty value means the verdict was not available. It is not
+            a sixth state, and it is never healthy.
+          valuemap:
+            name: 'Apiary health status'
+            mappings:
+              - value: healthy
+                newvalue: Healthy
+              - value: degraded
+                newvalue: Degraded
+              - value: contradictory
+                newvalue: Contradictory
+              - value: stale
+                newvalue: Stale
+              - value: unknown
+                newvalue: Unknown
+          tags:
+            - tag: Application
+              value: 'Apiary'
+            - tag: component
+              value: cluster
+
+      discovery_rules:
+        # One host per Comb, discovered from the node IDs in the report.
+        #
+        # The rule is a DEPENDENT discovery rule on the cluster report,
+        # so the Colony is polled once per interval rather than once per
+        # Comb. Zabbix allows an item prototype to depend on a regular
+        # item from the same host, which is what makes the per-node
+        # items below work as dependents of the report.
+        - uuid: 5d1f3a7b9c2e4d6a8f0b2c4e6a8d0f2b
+          name: 'Discover Apiary Combs'
+          type: DEPENDENT
+          key: 'apiary.node.discovery'
+          delay: '0'
+          description: |
+            Discovers one entity per Comb in the Colony, from the node IDs
+            in the monitoring report.
+          master_item:
+            key: 'apiary.cluster.report'
+          lld_macro_paths:
+            - lld_macro: '{#NODEID}'
+              path: '$.nodes[*].node_id'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.nodes[*]'
+          item_prototypes:
+            - uuid: 6f2a8c0e2d4f6a8c0e2f4a6b8d0e2f4a
+              name: 'Apiary: {#NODEID} health status'
+              type: DEPENDENT
+              key: 'apiary.node[{#NODEID}].health.status'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.nodes[?(@.node_id == "{#NODEID}")].health.status.first()'
+              master_item:
+                key: 'apiary.cluster.report'
+              description: |
+                This Comb's health verdict. The same five states as the
+                Colony's, and an absent value means "not observed", which
+                is never healthy.
+              valuemap:
+                name: 'Apiary health status'
+                mappings:
+                  - value: healthy
+                    newvalue: Healthy
+                  - value: degraded
+                    newvalue: Degraded
+                  - value: contradictory
+                    newvalue: Contradictory
+                  - value: stale
+                    newvalue: Stale
+                  - value: unknown
+                    newvalue: Unknown
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+                - tag: node
+                  value: '{#NODEID}'
+
+            - uuid: 1a3b5c7d9e1f3a5c7e9d1f3a5c7e9d1f3b
+              name: 'Apiary: {#NODEID} CPU load (1 minute)'
+              type: DEPENDENT
+              key: 'apiary.node[{#NODEID}].cpu.load1'
+              delay: '0'
+              trends: '0'
+              value_type: FLOAT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.nodes[?(@.node_id == "{#NODEID}")].cpu.load_avg_1.first()'
+              master_item:
+                key: 'apiary.cluster.report'
+              description: |
+                This Comb's one-minute CPU load average.
+
+                Absent when the CPU subsystem could not be read. It is
+                never zero: a zero here would be indistinguishable from
+                an idle machine.
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+                - tag: node
+                  value: '{#NODEID}'
+
+            - uuid: 4d6a8c0e2f4a6b8c0e2f4a6b8c0e2f4a
+              name: 'Apiary: {#NODEID} memory available'
+              type: DEPENDENT
+              key: 'apiary.node[{#NODEID}].memory.available_bytes'
+              delay: '0'
+              trends: '0'
+              value_type: UNSIGNED
+              units: B
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.nodes[?(@.node_id == "{#NODEID}")].mem.free_bytes.first()'
+              master_item:
+                key: 'apiary.cluster.report'
+              description: |
+                Free physical memory on this Comb, in bytes.
+
+                Absent when the memory subsystem could not be read. It is
+                never zero: a zero here would page an operator about a
+                healthy machine during an outage.
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+                - tag: node
+                  value: '{#NODEID}'
+
+            - uuid: 8c0e2a4b6d8f0a2c4e6a8c0e2a4b6d8f
+              name: 'Apiary: {#NODEID} worst pool capacity'
+              type: DEPENDENT
+              key: 'apiary.node[{#NODEID}].pool.worst_capacity_percent'
+              delay: '0'
+              trends: '0'
+              value_type: UNSIGNED
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.nodes[?(@.node_id == "{#NODEID}")].pools[*].capacity_pct.max()'
+              master_item:
+                key: 'apiary.cluster.report'
+              description: |
+                The most-used ZFS pool on this Comb, as a percentage of
+                its size.
+
+                This is the WORST pool, not the average: a monitoring
+                system that averaged would hide the pool that is
+                actually filling. Thresholds for it are the operator's
+                choice - Apiary does not pick them.
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+                - tag: node
+                  value: '{#NODEID}'
+
+            - uuid: 9e1a3c5d7f9b1d3f5a7c9e1b3d5f7a9b1d
+              name: 'Apiary: {#NODEID} worst disk health'
+              type: DEPENDENT
+              key: 'apiary.node[{#NODEID}].disk.worst_health'
+              delay: '0'
+              trends: '0'
+              value_type: UNSIGNED
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.nodes[?(@.node_id == "{#NODEID}")].disks[*].healthy'
+                - type: JAVASCRIPT
+                  parameters: |
+                    var disks = JSON.parse(value);
+                    var worst = 1;
+                    for (var i = 0; i < disks.length; i++) {
+                        if (disks[i] === false) {
+                            worst = 0;
+                        }
+                    }
+                    return worst;
+              master_item:
+                key: 'apiary.cluster.report'
+              description: |
+                1 when every disk on this Comb reports healthy, 0 when any
+                disk reports unhealthy.
+
+                Absent when the disk subsystem could not be read, which
+                is a different thing from "no disk is unhealthy" and is
+                not reported as 0.
+
+                Thresholds are the operator's choice.
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+                - tag: node
+                  value: '{#NODEID}'
+
+          trigger_prototypes:
+            - uuid: a5c7e9b1d3f5a7c9e1b3d5f7a9b1c3e5d
+              name: 'Apiary: {#NODEID} health is not healthy'
+              expression: |
+                last(/Apiary/apiary.node[{#NODEID}].health.status)<>"healthy"
+                and last(/Apiary/apiary.node[{#NODEID}].health.status)<>""
+              priority: WARNING
+              description: |
+                This Comb's health verdict changed to something other than
+                healthy.
+
+                An empty value does not fire this: a Comb whose verdict
+                could not be read is not the same as an unhealthy Comb,
+                and paging on it would page on every monitoring outage.
+              manual_close: 'YES'
+              recovery_mode: PROBLEM
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+
+            - uuid: b7d9f1a3c5e7a9b1c3d5f7a9b1c3d5e7f
+              name: 'Apiary: {#NODEID} observation is unavailable'
+              expression: |
+                nodata(/Apiary/apiary.node[{#NODEID}].health.status,{$APIARY.NODATA.WINDOW})=1
+              priority: WARNING
+              description: |
+                This Comb's observations stopped arriving.
+
+                This is deliberately a SEPARATE trigger from the
+                unhealthy one: an unreachable Comb and an unhealthy Comb
+                are different problems, and collapsing them means one
+                of them loses its alarm.
+              manual_close: 'YES'
+              recovery_mode: PROBLEM
+              tags:
+                - tag: Application
+                  value: 'Apiary'
+                - tag: component
+                  value: node
+      macros:
+        - macro: '{$APIARY.URL}'
+          description: 'Apiary REST shim base URL, HTTPS. Example: https://apiary.example.lab3.apiary.work'
+          value: 'https://apiary.example.lab3.apiary.work'
+        - macro: '{$APIARY.API_KEY}'
+          type: SECRET_TEXT
+          description: 'Apiary API key with the Viewer role. Store it as a Zabbix SECRET macro. It is never written into an item key, a URL, or a log.'
+        - macro: '{$APIARY.INTERVAL}'
+          description: 'How often to poll Apiary, in seconds. The default is 60. Apiary retains no history, so this interval IS the history resolution.'
+          value: '60'
+        - macro: '{$APIARY.NODATA.WINDOW}'
+          description: 'How long a Comb may report no data before the unavailable trigger fires, in seconds. Must be at least 30. The default is three polling intervals.'
+          value: '180'

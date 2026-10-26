@@ -2,7 +2,15 @@
 
 ## Status
 
-Proposed. This is an Apiary-side design proposal for issue #24; it does not claim that an integration has been implemented or that its product packaging is approved.
+**Implemented 2026-10-26 (issue #24).** The read-only Zabbix integration this record describes now exists as a Zabbix 7.0 template export at `etc/zabbix/apiary-zabbix-template.yaml`, with the checks that keep it honest in `internal/zabbixtemplate`. ADR-0168 records the implementation and the reasoning behind it.
+
+The product packaging remains open, exactly as this record left it: the template and basic external read-only access are not yet classified as core or paid, and no write operation is implemented.
+
+Two decisions in the body needed sharpening during the implementation, and both are now recorded in the template:
+
+  - **TLS VERIFICATION IS STATED, NOT ASSUMED.** Zabbix's own schema default for `verify_peer` and `verify_host` is OFF. A template that omits them accepts any certificate, so the template sets both explicitly and the test checks both. The decision above that "TLS certificate validation is required" is only true of the artefact if the artefact says so.
+
+  - **EACH PER-COMB ITEM SELECTS ITS OWN ROW.** The template polls the Colony once and reads the per-Comb values out of that one report. A per-Comb item's path is `$.nodes[?(@.node_id == "{#NODEID}")].<field>.first()`, because the master item is the whole report: a top-level path would resolve against the colony's verdict and every Comb would report it.
 
 Supersedes: None
 Superseded by: None
