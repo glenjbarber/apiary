@@ -18459,8 +18459,30 @@ type GetJoinRequestStatusResponse struct {
 	// It is NOT secret: it is an identifier, and the envelope's
 	// associated data binds it in.
 	PreparedCertificateReservationId string `protobuf:"bytes,7,opt,name=prepared_certificate_reservation_id,json=preparedCertificateReservationId,proto3" json:"prepared_certificate_reservation_id,omitempty"`
-	unknownFields                    protoimpl.UnknownFields
-	sizeCache                        protoimpl.SizeCache
+	// prepared_certificate_fingerprint is the prepared certificate's
+	// fingerprint.
+	//
+	// The joiner needs it to reconstruct the reservation the envelope was
+	// sealed for, because the envelope's associated data binds the
+	// reservation, the request, the node and this fingerprint together.
+	//
+	// It is NOT trusted by the joiner: the fingerprint is RE-DERIVED
+	// from the certificate that comes out of the envelope and compared,
+	// so a wrong value here produces a refusal to open rather than a
+	// wrong install.
+	PreparedCertificateFingerprint string `protobuf:"bytes,8,opt,name=prepared_certificate_fingerprint,json=preparedCertificateFingerprint,proto3" json:"prepared_certificate_fingerprint,omitempty"`
+	// prepared_certificate_fqdn is the name the prepared certificate
+	// covers.
+	//
+	// The joiner needs it to reconstruct the reservation the envelope
+	// was sealed for, because the envelope's associated data binds the
+	// reserved NAME as well as the reservation, the request, the node
+	// and the fingerprint. The name is what the certificate is checked
+	// against, so it has to be authenticated by the seal rather than
+	// supplied by the receiver.
+	PreparedCertificateFqdn string `protobuf:"bytes,9,opt,name=prepared_certificate_fqdn,json=preparedCertificateFqdn,proto3" json:"prepared_certificate_fqdn,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetJoinRequestStatusResponse) Reset() {
@@ -18538,6 +18560,20 @@ func (x *GetJoinRequestStatusResponse) GetSealedPreparedCertificate() []byte {
 func (x *GetJoinRequestStatusResponse) GetPreparedCertificateReservationId() string {
 	if x != nil {
 		return x.PreparedCertificateReservationId
+	}
+	return ""
+}
+
+func (x *GetJoinRequestStatusResponse) GetPreparedCertificateFingerprint() string {
+	if x != nil {
+		return x.PreparedCertificateFingerprint
+	}
+	return ""
+}
+
+func (x *GetJoinRequestStatusResponse) GetPreparedCertificateFqdn() string {
+	if x != nil {
+		return x.PreparedCertificateFqdn
 	}
 	return ""
 }
@@ -25574,7 +25610,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0etarget_address\x18\x02 \x01(\tR\rtargetAddress\x12+\n" +
 	"\x11introduction_code\x18\x03 \x01(\tR\x10introductionCode\x12A\n" +
 	"\x1drecipient_tls_certificate_pem\x18\x04 \x01(\tR\x1arecipientTlsCertificatePem\x12M\n" +
-	"#prepared_certificate_reservation_id\x18\x05 \x01(\tR preparedCertificateReservationId\"\x8a\x03\n" +
+	"#prepared_certificate_reservation_id\x18\x05 \x01(\tR preparedCertificateReservationId\"\x90\x04\n" +
 	"\x1cGetJoinRequestStatusResponse\x12;\n" +
 	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
@@ -25583,7 +25619,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x1asecond_pin_expires_at_unix\x18\x04 \x01(\x03R\x16secondPinExpiresAtUnix\x12-\n" +
 	"\x12sealed_credentials\x18\x05 \x01(\fR\x11sealedCredentials\x12>\n" +
 	"\x1bsealed_prepared_certificate\x18\x06 \x01(\fR\x19sealedPreparedCertificate\x12M\n" +
-	"#prepared_certificate_reservation_id\x18\a \x01(\tR preparedCertificateReservationId\"\xa6\x01\n" +
+	"#prepared_certificate_reservation_id\x18\a \x01(\tR preparedCertificateReservationId\x12H\n" +
+	" prepared_certificate_fingerprint\x18\b \x01(\tR\x1epreparedCertificateFingerprint\x12:\n" +
+	"\x19prepared_certificate_fqdn\x18\t \x01(\tR\x17preparedCertificateFqdn\"\xa6\x01\n" +
 	"*GetMemberRestartGuardrailCredentialRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12A\n" +
 	"\x1drecipient_tls_certificate_pem\x18\x02 \x01(\tR\x1arecipientTlsCertificatePem\x12\x1c\n" +

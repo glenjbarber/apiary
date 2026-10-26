@@ -62,6 +62,24 @@ func AssociatedData(reservationID, requestID, nodeID, fingerprint string) []byte
 	return []byte("apiary-certificate-reservation/v1\x00" + reservationID + "\x00" + requestID + "\x00" + nodeID + "\x00" + fingerprint)
 }
 
+// AssociatedDataFor is AssociatedData with the reserved NAME bound in
+// as well.
+//
+// The name is what the receiver checks the certificate against - a
+// certificate for the wrong name would install cleanly and then fail
+// every handshake with a name mismatch - so the name has to be
+// AUTHENTICATED rather than supplied by the receiver. Binding it in
+// the associated data means a delivery for one name cannot be opened
+// and believed to be for another.
+//
+// The version tag is bumped, because the associated data changed: an
+// envelope sealed under the old rule would not open under the new
+// one, and that is the correct outcome for a change to what the seal
+// authenticates.
+func AssociatedDataFor(reservationID, requestID, nodeID, fingerprint, fqdn string) []byte {
+	return []byte("apiary-certificate-reservation/v2\x00" + reservationID + "\x00" + requestID + "\x00" + nodeID + "\x00" + fingerprint + "\x00" + fqdn)
+}
+
 // SealDelivery seals a bundle to the joining Comb's serving
 // certificate.
 //
@@ -72,14 +90,14 @@ func AssociatedData(reservationID, requestID, nodeID, fingerprint string) []byte
 // else - not by the preparing Comb, not by a third party that learns
 // the reservation ID, and not by a different joiner that presents the
 // same hostname.
-func SealDelivery(res *Reservation, requestID, nodeID, recipientCertificatePEM, privateKeyPEM string, issuedAt time.Time) ([]byte, error) {
+func SealDelivery(res *Reservation, requestID, nodeID, recipientCertificatePEM, bootstrapPrivateKeyPEM string, issuedAt time.Time) ([]byte, error) {
 	if res == nil {
 		return nil, fmt.Errorf("certreservation: the reservation is required")
 	}
 	if strings.TrimSpace(recipientCertificatePEM) == "" {
 		return nil, fmt.Errorf("certreservation: the recipient's certificate is required")
 	}
-	if strings.TrimSpace(privateKeyPEM) == "" {
+	if strings.TrimSpace(bootstrapPrivateKeyPEM) == "" {
 		return nil, fmt.Errorf("certreservation: the bootstrap private key is required")
 	}
 	if res.Fingerprint == "" {
@@ -92,15 +110,19 @@ func SealDelivery(res *Reservation, requestID, nodeID, recipientCertificatePEM, 
 		NodeID:         nodeID,
 		FQDN:           res.FQDN,
 		CertificatePEM: res.CertificatePEM,
-		PrivateKeyPEM:  privateKeyPEM,
-		Fingerprint:    res.Fingerprint,
-		IssuedAtUnix:   issuedAt.UTC().Unix(),
+		// The BOOTSTRAP key is the one that goes in the bundle: it is
+		// the key of the PREPARED certificate, and it is the key the
+		// joiner installs. The RECIPIENT's key is what the envelope is
+		// addressed to, and it never enters the bundle.
+		PrivateKeyPEM: bootstrapPrivateKeyPEM,
+		Fingerprint:   res.Fingerprint,
+		IssuedAtUnix:  issuedAt.UTC().Unix(),
 	}
 	plaintext, err := marshalBundle(bundle)
 	if err != nil {
 		return nil, err
 	}
-	aad := AssociatedData(res.ID, requestID, nodeID, res.Fingerprint)
+	aad := AssociatedDataFor(res.ID, requestID, nodeID, res.Fingerprint, res.FQDN)
 	envelope, err := joincredential.Seal([]byte(recipientCertificatePEM), plaintext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("certreservation: sealing the delivery: %w", err)
@@ -131,7 +153,7 @@ func OpenDelivery(envelopeJSON, certificatePEM, privateKeyPEM string, res *Reser
 	if res == nil {
 		return nil, fmt.Errorf("certreservation: the reservation is required")
 	}
-	aad := AssociatedData(res.ID, res.RequestID, res.NodeID, res.Fingerprint)
+	aad := AssociatedDataFor(res.ID, res.RequestID, res.NodeID, res.Fingerprint, res.FQDN)
 	plaintext, err := joincredential.Open([]byte(envelopeJSON), []byte(certificatePEM), []byte(privateKeyPEM), aad)
 	if err != nil {
 		return nil, fmt.Errorf("certreservation: opening the delivery: %w", err)

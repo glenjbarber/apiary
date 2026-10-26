@@ -4341,6 +4341,30 @@ message GetJoinRequestStatusResponse {
   // It is NOT secret: it is an identifier, and the envelope's
   // associated data binds it in.
   string prepared_certificate_reservation_id = 7;
+
+  // prepared_certificate_fingerprint is the prepared certificate's
+  // fingerprint.
+  //
+  // The joiner needs it to reconstruct the reservation the envelope was
+  // sealed for, because the envelope's associated data binds the
+  // reservation, the request, the node and this fingerprint together.
+  //
+  // It is NOT trusted by the joiner: the fingerprint is RE-DERIVED
+  // from the certificate that comes out of the envelope and compared,
+  // so a wrong value here produces a refusal to open rather than a
+  // wrong install.
+  string prepared_certificate_fingerprint = 8;
+
+  // prepared_certificate_fqdn is the name the prepared certificate
+  // covers.
+  //
+  // The joiner needs it to reconstruct the reservation the envelope
+  // was sealed for, because the envelope's associated data binds the
+  // reserved NAME as well as the reservation, the request, the node
+  // and the fingerprint. The name is what the certificate is checked
+  // against, so it has to be authenticated by the seal rather than
+  // supplied by the receiver.
+  string prepared_certificate_fqdn = 9;
 }
 
 message GetMemberRestartGuardrailCredentialRequest {
