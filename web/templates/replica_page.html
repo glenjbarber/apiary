@@ -1,0 +1,51 @@
+{{define "replica_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Replication" "Every cell that has a HAST replica, and what the two ends of that pair actually reported.")}}
+
+    {{if .Error}}<div class="banner-error" role="alert">{{.Error}}</div>{{end}}
+
+    <p class="muted">
+      Apiary has no colony-wide HAST health reading: HAST's state lives on the two nodes
+      that hold each pair, so this page asks each pair. The evidence below is the same
+      evidence the cell's own detail page shows.
+    </p>
+
+    {{if .ReplicaPage.Rows}}
+    <div class="table-scroll" role="region" aria-label="Replica freshness table" tabindex="0">
+    <table class="replica-table">
+      <thead><tr><th>Cell</th><th>Owner</th><th>Replica</th><th>Freshness</th><th>Observed</th></tr></thead>
+      <tbody>
+        {{range .ReplicaPage.Rows}}<tr>
+          <td><a href="{{.Href}}"><strong>{{.ID}}</strong></a>{{if .Name}}<div class="muted">{{.Name}}</div>{{end}}<div class="muted">{{.Kind}}</div></td>
+          <td>{{.Owner}}</td>
+          <td>{{.Replica}}</td>
+          <td>
+            <span class="dot {{.VerdictState}}" title="{{.VerdictState}}" aria-hidden="true"></span>
+            <span class="visually-hidden">{{.VerdictState}}</span>
+            <span class="badge {{.VerdictState}}">{{.Verdict}}</span>
+            <div class="muted">{{.Explanation}}</div>
+          </td>
+          <td>
+            <table class="compact-table"><thead><tr><th>Node</th><th>Role</th><th>HAST status</th><th>Mode</th><th>Last updated</th></tr></thead><tbody>
+            {{range .Observations}}<tr><td>{{.NodeID}}</td><td>{{if .Role}}{{.Role}}{{else}}unknown{{end}}</td><td>{{if .Error}}unknown: {{.Error}}{{else}}{{if .Status}}{{.Status}}{{else}}unknown{{end}}{{end}}</td><td>{{if .Replication}}{{.Replication}}{{else}}unknown{{end}}</td><td data-age-of="{{if .ObservedAtUnix}}{{.ObservedAtUnix}}{{end}}">{{if .ObservedAgo}}{{.ObservedAgo}}{{else}}unknown{{end}}</td></tr>{{end}}
+            </tbody></table>
+          </td>
+        </tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    <p class="muted">Apiary does not derive a numeric RPO from dirty extents. HAST status is point-in-time evidence, not a failover guarantee.</p>
+    {{if .ReplicaPage.Unprotected}}<p class="muted">{{.ReplicaPage.Unprotected}} other cell{{if ne .ReplicaPage.Unprotected 1}}s{{end}} in this Colony {{if eq .ReplicaPage.Unprotected 1}}has{{else}}have{{end}} no HAST replica configured, and {{if eq .ReplicaPage.Unprotected 1}}is{{else}}are{{end}} therefore not listed above. A cell with no replica is a design choice, not a replication failure.</p>{{end}}
+    {{else}}
+    <p class="muted">No cell in this Colony has a HAST replica configured{{if .ReplicaPage.Unprotected}} ({{.ReplicaPage.Unprotected}} cell{{if ne .ReplicaPage.Unprotected 1}}s{{end}} have no replica){{end}}. There is no replication state to report.</p>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -1315,7 +1315,13 @@ func TestServer_VMsPage_MarksRemoteNodeVisually(t *testing.T) {
 	}
 }
 
-func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
+// TestServer_AppShellUsesTheBlendChrome checks the application shell.
+//
+// It is the "Apiary: UI Redesign" handoff's chrome: an icon rail on the
+// left, a top bar across the content column, and the content below it.
+// The old assertion was a text sidebar with four sections; the new one
+// is a rail of labelled icons with a tab strip under the top bar.
+func TestServer_AppShellUsesTheBlendChrome(t *testing.T) {
 	s := newTestServer(t, &fakeClient{})
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/vms", nil))
@@ -1326,24 +1332,31 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`<body class="app-layout">`,
-		`<aside class="sidebar" id="primary-navigation">`,
+		`<nav class="rail" aria-label="Primary navigation">`,
+		`<header class="topbar">`,
 		`id="main-content"`,
-		`id="theme-toggle"`,
 		`class="table-scroll" role="region" aria-label="Virtual machines table" tabindex="0"`,
 		`<table class="resource-table">`,
-		`class="settings-menu`,
-		`>Resources</h2>`,
-		`>Topology</h2>`,
-		`>Colony</h2>`,
-		`>Command Center</a>`,
+		`id="palette-open"`,
 		`class="app-footer"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("application shell missing %q", want)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link active" href="/vms" aria-current="page"`) {
-		t.Errorf("VMs page should mark its sidebar entry current, got: %s", body)
+	// The rail's sections, in the handoff's order.
+	for _, want := range []string{">Overview<", ">Cells<", ">Combs<", ">Network<", ">Storage<", ">Images<", ">Colony<", ">Settings<"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the rail is missing its %q section", want)
+		}
+	}
+	// The VMs page's section is the active one, and its tab is the
+	// active tab.
+	if !strings.Contains(body, `class="rail-item active" href="/vms" aria-current="page"`) {
+		t.Errorf("VMs page should mark its rail section current, got: %s", body)
+	}
+	if !strings.Contains(body, `class="active" href="/vms" aria-current="page">Virtual machines</a>`) {
+		t.Errorf("VMs page should mark its tab current, got: %s", body)
 	}
 }
 
@@ -1427,13 +1440,21 @@ func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"apiarium", "freebsd-apiary", "Reachable", `href="/host/apiarium"`, `href="/host/freebsd-apiary"`} {
+	for _, want := range []string{"apiarium", "freebsd-apiary", `href="/host/apiarium"`, `href="/host/freebsd-apiary"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("cluster overview page missing %q, got: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Command Center</a>`) {
-		t.Errorf("Colony overview should mark Command Center active, got: %s", body)
+	// The overview's own three sections, in the handoff's order.
+	if !strings.Contains(body, "Needs attention") {
+		t.Errorf("the overview is missing its Needs-attention section, got: %s", body)
+	}
+	if !strings.Contains(body, "Combs") {
+		t.Errorf("the overview is missing its Combs section, got: %s", body)
+	}
+	// The overview's rail item is the active one.
+	if !strings.Contains(body, `class="rail-item active" href="/" aria-current="page"`) {
+		t.Errorf("Colony overview should mark the Overview rail section active, got: %s", body)
 	}
 }
 

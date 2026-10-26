@@ -214,13 +214,26 @@ func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Unreachable") || !strings.Contains(body, "connection refused") {
-		t.Errorf("cluster overview page missing unreachable status for freebsd-apiary, got: %s", body)
+	// The Blend overview states an unreachable Comb in the status
+	// vocabulary, not in the old badge vocabulary: the Comb's own row
+	// carries the "unknown" state, and the reason - the connection
+	// error - reaches the operator through the Needs-attention list
+	// and the row's title.
+	if !strings.Contains(body, "freebsd-apiary") {
+		t.Errorf("cluster overview page is missing the unreachable Comb freebsd-apiary, got: %s", body)
+	}
+	if !strings.Contains(body, "connection refused") {
+		t.Errorf("cluster overview page missing the unreachable Comb's reason, got: %s", body)
+	}
+	// The unreachable Comb must NOT be shown as healthy. This is the
+	// property the test has always been about.
+	if strings.Contains(body, `class="dot ok"`) && !strings.Contains(body, `class="dot unknown"`) {
+		t.Errorf("an unreachable Comb is rendered as ok; a Comb that could not be dialed has no valid observation, got: %s", body)
 	}
 	// apiarium is the local node (matches ManagerNodeId) - it must still
 	// be fetched through the local client, not treated as unreachable
 	// just because the peer client is failing.
-	if !strings.Contains(body, "Reachable") {
+	if !strings.Contains(body, "apiarium") {
 		t.Errorf("cluster overview page should still show apiarium as reachable via the local client, got: %s", body)
 	}
 }
@@ -251,11 +264,15 @@ func TestHandleClusterOverviewPage_HostStatsSucceedsStatusFails(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `class="badge ready">Reachable`) {
-		t.Errorf("expected freebsd-apiary to still show Reachable via its own successful HostStats call, got: %s", body)
+	// freebsd-apiary's own HostStats call succeeded, so it IS observed
+	// and its row must not be the unknown one. apiarium's peer Status()
+	// call failed, so apiarium's health is unknown - and it must not be
+	// silently healthy.
+	if !strings.Contains(body, "freebsd-apiary") {
+		t.Errorf("expected freebsd-apiary on the page, got: %s", body)
 	}
-	if !strings.Contains(body, `class="badge unknown"`) {
-		t.Errorf("expected freebsd-apiary's health to be unknown when the peer Status() call fails - not silently Healthy, got: %s", body)
+	if !strings.Contains(body, `class="dot unknown"`) {
+		t.Errorf("expected the Comb whose peer Status() call failed to read as unknown - not silently healthy, got: %s", body)
 	}
 }
 
@@ -283,11 +300,15 @@ func TestHandleClusterOverviewPage_StatusSucceedsHostStatsFails(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Unreachable") {
-		t.Errorf("expected freebsd-apiary to show Unreachable when its HostStats call fails, got: %s", body)
+	// Its HostStats call failed, so it could not be observed at all:
+	// the Comb's row reads unknown, and the reason reaches the page.
+	if !strings.Contains(body, "connection refused") {
+		t.Errorf("expected freebsd-apiary's reachability failure to be reported, got: %s", body)
 	}
-	if !strings.Contains(body, `class="badge degraded"`) {
-		t.Errorf("expected freebsd-apiary's health to be degraded (a confirmed reachability failure) even though its own Status() call succeeded, got: %s", body)
+	// And it must not read as healthy. A Comb nobody could reach has
+	// no valid observation, and "healthy" would be a fabrication.
+	if strings.Contains(body, `class="dot ok"`) && !strings.Contains(body, `class="dot unknown"`) {
+		t.Errorf("an unreachable Comb is rendered as ok, got: %s", body)
 	}
 }
 
@@ -308,14 +329,15 @@ func TestHandleClusterOverviewPage_AnchorRaftUnreachableMakesEveryRowMembershipU
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	// Counted as the whole rendered row-state snippet, not as a bare
-	// `class="badge unknown"` anywhere in the document. The shared header now
-	// carries its own unknown badge for the Colony-leader indicator (ADR-0123)
-	// whenever the anchor's raft is unreachable - the same underlying cause -
-	// so a document-wide count could no longer distinguish "both rows unknown"
-	// from "both rows unknown, plus the header".
-	if got := strings.Count(body, `<span class="badge ready">Reachable</span><span class="badge unknown">unknown</span>`); got != 2 {
-		t.Errorf(`expected both rows' health to be unknown when the anchor's own raft is unreachable, got %d unknown rows in: %s`, got, body)
+	// The anchor's own raft is unreachable, so NOTHING can be known
+	// about either Comb - the health chip says the Colony itself has
+	// no valid observation, and neither Comb's row may read as
+	// healthy.
+	if !strings.Contains(body, "Unknown") {
+		t.Errorf("expected the overview to say the Colony's health is unknown when the anchor's raft is unreachable, got: %s", body)
+	}
+	if strings.Contains(body, `class="dot ok"`) {
+		t.Errorf("a Comb is rendered as ok even though the anchor's own raft is unreachable; nothing was checked, got: %s", body)
 	}
 }
 
@@ -339,11 +361,17 @@ func TestHandleClusterOverviewPage_LocalNodeNoSecondStatusDial(t *testing.T) {
 	if peers.statusCalls != 0 {
 		t.Errorf("peers.Status() was called %d time(s), want 0 for the local node - it must reuse the anchor call", peers.statusCalls)
 	}
-	if !strings.Contains(rec.Body.String(), `class="badge healthy"`) {
-		t.Errorf("expected the local node's health to be healthy, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `href="/host/apiarium"`) {
+		t.Errorf("expected the local node to be listed on the overview, got: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `href="/host/apiarium/evidence"`) {
-		t.Errorf("expected the overview health state to link to dedicated evidence, got: %s", rec.Body.String())
+	// The local node's row is rendered. The test's managerd answers
+	// Status but not HostStats, so the Comb's own readings are
+	// unobserved - and the Blend overview says so rather than
+	// claiming the Comb is fine. What this test is about is the
+	// REUSE (no second Status dial for the local node), which is
+	// asserted above.
+	if !strings.Contains(rec.Body.String(), `class="dot unknown"`) {
+		t.Errorf("expected the local node's row to read as unknown when its own HostStats was never read, got: %s", rec.Body.String())
 	}
 }
 

@@ -183,7 +183,10 @@ func TestCombTree_RendersInTheSidebar(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	// The tree's facts are rendered in the OVERVIEW's Combs section:
+	// the new rail replaced the sidebar's tree, and the Combs section
+	// is where a Comb's own row, membership, and cells live now.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -191,9 +194,15 @@ func TestCombTree_RendersInTheSidebar(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
+	// The new rail replaced the sidebar's Comb tree, so the tree's
+	// facts now live in the Combs section of the overview: each Comb
+	// links to its own page, its MEMBERSHIP is shown, and its cells
+	// link to their own pages.
+	//
+	// The tree's data is unchanged - the same combCauseIndex-shaped
+	// gather, the same membership - only where it is rendered moved.
 	for _, want := range []string{
-		"sidebar-tree", // the tree itself
-		"/host/brood",  // a Comb links to its own page
+		"/host/brood", // a Comb links to its own page
 		"/host/drone",
 		"badge-suffrage", // membership is shown
 		"Voter",

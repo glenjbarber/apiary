@@ -681,13 +681,13 @@ func TestClusterOverviewPage_CardShowsTheCauseLine(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	start := strings.Index(body, `class="cockpit-node-cause"`)
+	start := strings.Index(body, `class="ov-cause"`)
 	if start < 0 {
-		t.Fatalf("overview card has no cause line; body: %s", body)
+		t.Fatalf("overview row has no cause line; body: %s", body)
 	}
 	line := body[start : start+400]
 	// Ticking but never having succeeded is a failure, not a healthy
-	// result, and the card must say so.
+	// result, and the row must say so.
 	if !strings.Contains(line, "observed failed") {
 		t.Errorf("cause line does not report the failed tick: %s", line)
 	}

@@ -130,9 +130,14 @@ func TestStateDigestBadgeRendersProvenDivergence(t *testing.T) {
 		nodes[i].DigestDetail = view.Detail
 	}
 
+	// The Combs section is built from the same function the page's
+	// handler uses, so this test exercises the shape the real page
+	// renders rather than a hand-made one.
+	combs := overviewCombViewFromNodes(nodes, "", nil, colony)
+
 	s := newTestServer(t, &fakeClient{})
 	rec := httptest.NewRecorder()
-	s.render(rec, "cluster_overview_page", pageData{ClusterNodes: nodes, StateDigestColony: colony, ActivePage: "stats"})
+	s.render(rec, "cluster_overview_page", pageData{Overview: overviewBundle{Combs: combs}, StateDigestColony: colony, ActivePage: "stats"})
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
