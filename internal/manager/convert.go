@@ -244,6 +244,31 @@ func toInternalTrustedPeer(p *rpcpb.TrustedPeer) *internalpb.TrustedPeer {
 	}
 }
 
+// toRPCCertificateReservation mirrors internalpb.CertificateReservation
+// onto the external one (ADR-0171).
+//
+// It carries METADATA only: a FQDN, a fingerprint, and the joining
+// Comb and request the preparation has been bound to. The prepared
+// certificate's private key is not in the record and is not rendered
+// by this function, because it is not anywhere in the store either.
+func toRPCCertificateReservation(r *internalpb.CertificateReservation) *rpcpb.CertificateReservation {
+	if r == nil {
+		return nil
+	}
+	return &rpcpb.CertificateReservation{
+		ReservationId:   r.GetReservationId(),
+		Fqdn:            r.GetFqdn(),
+		Fingerprint:     r.GetFingerprint(),
+		NodeId:          r.GetNodeId(),
+		RequestId:       r.GetRequestId(),
+		CreatedAtUnix:   r.GetCreatedAtUnix(),
+		ExpiresAtUnix:   r.GetExpiresAtUnix(),
+		BoundAtUnix:     r.GetBoundAtUnix(),
+		DeliveredAtUnix: r.GetDeliveredAtUnix(),
+		PreparedBy:      r.GetPreparedBy(),
+	}
+}
+
 // toRPCTustedPeer mirrors internalpb.TrustedPeer onto the external
 // message PinPeerCertificate/UnpinPeerCertificate carry.
 func toRPCTustedPeer(p *internalpb.TrustedPeer) *rpcpb.TrustedPeer {

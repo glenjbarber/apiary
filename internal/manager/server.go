@@ -222,6 +222,11 @@ type PeerForwarder interface {
 	TransitionPeerCertificate(ctx context.Context, addr string, req *rpcpb.TransitionPeerCertificateRequest) (*rpcpb.TransitionPeerCertificateResponse, error)
 	ActivatePeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.ActivatePeerCertificateTransitionRequest) (*rpcpb.ActivatePeerCertificateTransitionResponse, error)
 	AbandonPeerCertificateTransition(ctx context.Context, addr string, req *rpcpb.AbandonPeerCertificateTransitionRequest) (*rpcpb.AbandonPeerCertificateTransitionResponse, error)
+
+	// The two ADR-0171 reservation writers forward to the leader for
+	// the same reason: they mutate replicated state.
+	PrepareCertificateReservation(ctx context.Context, addr string, req *rpcpb.PrepareCertificateReservationRequest) (*rpcpb.PrepareCertificateReservationResponse, error)
+	DropCertificateReservation(ctx context.Context, addr string, req *rpcpb.DropCertificateReservationRequest) (*rpcpb.DropCertificateReservationResponse, error)
 	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
 
 	// CancelJoinRequest/PurgeJoinRequest mirror RequestJoinColony/

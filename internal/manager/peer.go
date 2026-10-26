@@ -1177,6 +1177,27 @@ func (p *PeerReporter) AbandonPeerCertificateTransition(ctx context.Context, add
 	return client.AbandonPeerCertificateTransition(ctx, req)
 }
 
+// PrepareCertificateReservation and DropCertificateReservation forward
+// to the leader, for the same reason the trust-store calls above do:
+// they mutate replicated state, and only the leader may do that.
+func (p *PeerReporter) PrepareCertificateReservation(ctx context.Context, addr string, req *rpcpb.PrepareCertificateReservationRequest) (*rpcpb.PrepareCertificateReservationResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.PrepareCertificateReservation(ctx, req)
+}
+
+func (p *PeerReporter) DropCertificateReservation(ctx context.Context, addr string, req *rpcpb.DropCertificateReservationRequest) (*rpcpb.DropCertificateReservationResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.DropCertificateReservation(ctx, req)
+}
+
 // OpenColonyJoinWindow/CloseColonyJoinWindow forward on a leader-hint
 // rejection, mirroring ApproveJoinRequest above exactly (ADR-0147
 // Part 4). addr is this node's own trusted, internally-derived notion

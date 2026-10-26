@@ -889,6 +889,21 @@ func (f *fakeClient) AbandonPeerCertificateTransition(context.Context, *rpcpb.Ab
 	return &rpcpb.AbandonPeerCertificateTransitionResponse{}, nil
 }
 
+// The three ADR-0171 reservation calls. The frontend and the REST shim
+// do not expose them - they are managerd acts with no route - so the
+// fake answers with an empty response.
+func (f *fakeClient) PrepareCertificateReservation(context.Context, *rpcpb.PrepareCertificateReservationRequest, ...grpc.CallOption) (*rpcpb.PrepareCertificateReservationResponse, error) {
+	return &rpcpb.PrepareCertificateReservationResponse{}, nil
+}
+
+func (f *fakeClient) ListCertificateReservations(context.Context, *rpcpb.ListCertificateReservationsRequest, ...grpc.CallOption) (*rpcpb.ListCertificateReservationsResponse, error) {
+	return &rpcpb.ListCertificateReservationsResponse{}, nil
+}
+
+func (f *fakeClient) DropCertificateReservation(context.Context, *rpcpb.DropCertificateReservationRequest, ...grpc.CallOption) (*rpcpb.DropCertificateReservationResponse, error) {
+	return &rpcpb.DropCertificateReservationResponse{}, nil
+}
+
 func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
 	f.lastGetWindowReq = in
 	if f.getWindowErr != nil {

@@ -100,6 +100,15 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.TrustedPeer != nil {
 		payload = result.TrustedPeer
 	}
+	// CertificateReservation is ADR-0171's reservation result. It has
+	// an arm of its own for the same reason the TrustedPeer arm above
+	// does: without one, a successful reservation would answer with
+	// zero bytes, which the managerd side unmarshals into a
+	// zero-valued reservation - and a caller reading that would think
+	// no preparation had been recorded.
+	if result.CertificateReservation != nil {
+		payload = result.CertificateReservation
+	}
 	// ColonyJoinWindow is the arm most easily forgotten, and forgetting
 	// it fails open rather than loudly: with no arm, payload stays
 	// result.VM (nil), proto.Marshal(nil) yields zero bytes rather than
@@ -297,6 +306,15 @@ func (s *Server) RemoveServer(_ context.Context, req *internalpb.RemoveServerReq
 // per-host derived file needs.
 func (s *Server) ListTrustedPeersLocal(_ context.Context, _ *internalpb.ListTrustedPeersRequest) (*internalpb.ListTrustedPeersResponse, error) {
 	return &internalpb.ListTrustedPeersResponse{Peers: s.node.ListTrustedPeersLocal()}, nil
+}
+
+// ListCertificateReservationsLocal implements
+// internalpb.RaftInternalServer - ADR-0171's prepared-certificate
+// reservations.
+func (s *Server) ListCertificateReservationsLocal(_ context.Context, _ *internalpb.ListCertificateReservationsRequest) (*internalpb.ListCertificateReservationsResponse, error) {
+	return &internalpb.ListCertificateReservationsResponse{
+		Reservations: s.node.ListCertificateReservationsLocal(),
+	}, nil
 }
 
 // GetVM implements internalpb.RaftInternalServer.

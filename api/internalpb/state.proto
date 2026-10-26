@@ -641,6 +641,25 @@ message Command {
     ActivateTrustedPeerTransition activate_trusted_peer_transition = 50;
     AbandonTrustedPeerTransition abandon_trusted_peer_transition = 51;
 
+    // CreateCertificateReservation/BindCertificateReservation/
+    // DeliverCertificateReservation/DropCertificateReservation are
+    // ADR-0171's prepared-certificate reservation: a certificate
+    // prepared for a Comb that has not joined yet, and the act of
+    // handing it over.
+    //
+    // They are raft commands rather than managerd memory for the
+    // reason the rest of this oneof is: the binding must survive a
+    // leadership change, and a reservation that lived only in one
+    // managerd's memory would leave a joining Comb holding a
+    // reservation it could never collect.
+    //
+    // Fields 52/53/54/55 rather than reusing anything: protobuf field
+    // numbers are a permanent wire contract.
+    CreateCertificateReservation create_certificate_reservation = 52;
+    BindCertificateReservation bind_certificate_reservation = 53;
+    DeliverCertificateReservation deliver_certificate_reservation = 54;
+    DropCertificateReservation drop_certificate_reservation = 55;
+
     // RecordJoinApproval is ADR-0147 Part 3's two-person rule: one
     // authorizing act, recorded in replicated state, that resolves
     // nothing. Replicated rather than node-local for the same reason
@@ -1519,6 +1538,27 @@ message CreatePendingJoinRequest {
 message ApprovePendingJoinRequest {
   string request_id = 1;
 
+  // prepared_certificate_reservation_id is ADR-0171's reservation, bound
+  // to THIS request and THIS Comb by the very command that approves
+  // the join.
+  //
+  // The binding rides here rather than being a separate command
+  // because the approval is the moment the Colony decides which Comb
+  // is joining - and a reservation that was bound earlier could have
+  // been bound to a request that is later rejected. Binding it in the
+  // same log entry means "approved" and "the preparation belongs to
+  // this Comb" are one replicated fact, exactly as the pin promotion
+  // beside it is.
+  //
+  // Empty means no prepared certificate is involved, which is the
+  // ordinary case.
+  string prepared_certificate_reservation_id = 4;
+
+  // prepared_certificate_bound_at_unix is when the binding happened.
+  // It is an INPUT rather than a wall-clock read, for the determinism
+  // reason every other timestamp in this file is.
+  int64 prepared_certificate_bound_at_unix = 5;
+
   // authorization_id / consumed_at_unix are ADR-0147 Part 3's record of
   // use, written by the very command that approves so the two cannot
   // disagree. The leader has already checked that the entry matched, was
@@ -1973,6 +2013,106 @@ message AbandonTrustedPeerTransition {
 
   // reason is recorded with the abandonment for the same reason
   // TransitionTrustedPeer records one.
+  string reason = 2;
+}
+
+// CertificateReservation is a certificate prepared for a Comb that has
+// not joined the Colony yet (ADR-0169, ADR-0171).
+//
+// It is a distinct record from a TrustedPeer pin, and the separation
+// is deliberate: a pin is a trust anchor somebody compared, and a
+// reservation is a pending intent. A reservation never appears in the
+// peer trust store and never implies membership.
+//
+// The prepared CERTIFICATE is NOT in this record. A reservation names
+// a fingerprint and a FQDN; the bytes live in whatever protected store
+// the preparing Comb keeps them in, and they are sealed to the
+// joining Comb at delivery time. Putting the certificate here would
+// put a private key's worth of material into replicated state, which
+// ADR-0169 forbids outright.
+message CertificateReservation {
+  // reservation_id is the reservation's identifier. It is unguessable,
+  // because it identifies a preparation, and knowing it is not
+  // authority to collect one.
+  string reservation_id = 1;
+
+  // fqdn is the name the certificate was issued for.
+  string fqdn = 2;
+
+  // fingerprint is the hostcert digest of the prepared certificate, so
+  // the binding between a reservation and a specific certificate is
+  // recorded rather than assumed.
+  string fingerprint = 3;
+
+  // node_id is the Comb this reservation is bound to. It is EMPTY until
+  // the join flow binds it, and an unbound reservation is deliverable
+  // to nobody.
+  string node_id = 4;
+
+  // request_id is the join request this reservation is bound to. The
+  // delivery is refused unless the join request presenting it is the
+  // request the reservation was prepared for.
+  string request_id = 5;
+
+  // created_at_unix / expires_at_unix bound the delivery window, in
+  // whole Unix seconds like every other replicated timestamp here.
+  int64 created_at_unix = 6;
+  int64 expires_at_unix = 7;
+
+  // bound_at_unix is when the reservation was bound to a joining node,
+  // zero if it was not.
+  int64 bound_at_unix = 8;
+
+  // delivered_at_unix is when the prepared pair was delivered, zero if
+  // it was not. A delivered reservation is spent.
+  int64 delivered_at_unix = 9;
+
+  // prepared_by is the node ID of the member that prepared the
+  // certificate. It is replicated so an incident review can answer
+  // "who prepared this", which is the question a prepared private key
+  // actually raises.
+  string prepared_by = 10;
+}
+
+// CreateCertificateReservation records a prepared certificate.
+//
+// The certificate itself is NOT carried here: it stays in the
+// preparing Comb's protected store and is sealed to the joining Comb
+// at delivery time.
+message CreateCertificateReservation {
+  CertificateReservation reservation = 1;
+}
+
+// BindCertificateReservation binds a reservation to the joining Comb
+// and the join request that identifies it.
+//
+// It is refused if the reservation is already bound, and refused if the
+// node does not match the reservation's own. A prepared private key
+// has two holders until the joiner replaces it; making it three would
+// defeat the point.
+message BindCertificateReservation {
+  string reservation_id = 1;
+  string node_id = 2;
+  string request_id = 3;
+  int64 bound_at_unix = 4;
+}
+
+// DeliverCertificateReservation marks a reservation as delivered.
+//
+// A delivered reservation is SPENT. That is what makes the delivery
+// single-use: the state moves once and never moves back.
+message DeliverCertificateReservation {
+  string reservation_id = 1;
+  int64 delivered_at_unix = 2;
+}
+
+// DropCertificateReservation removes a reservation outright.
+//
+// It is how a withdrawn or expired preparation is cleared, and how a
+// request that reached a terminal state without collecting its
+// reservation is cleaned up.
+message DropCertificateReservation {
+  string reservation_id = 1;
   string reason = 2;
 }
 
@@ -2455,6 +2595,16 @@ message FSMSnapshotState {
   // descriptor, so it picks the new map up with no second list to
   // forget.
   map<string, TrustedPeer> trusted_peers = 15;
+
+  // certificate_reservations is ADR-0171's prepared-certificate
+  // reservations, keyed by reservation_id.
+  //
+  // Replicated rather than managerd-local because the BINDING must
+  // survive a leadership change: a reservation bound in one
+  // managerd's memory would be lost if that managerd stepped aside,
+  // and the joining Comb would be left holding a reservation it could
+  // never collect.
+  map<string, CertificateReservation> certificate_reservations = 18;
 
   // colony_disk_size is ADR-0148's Colony-wide VM disk-size floor. A
   // message rather than a map entry because there is exactly one per

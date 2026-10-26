@@ -19,31 +19,32 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftInternal_Apply_FullMethodName                        = "/apiary.internal.v1.RaftInternal/Apply"
-	RaftInternal_Status_FullMethodName                       = "/apiary.internal.v1.RaftInternal/Status"
-	RaftInternal_AddVoter_FullMethodName                     = "/apiary.internal.v1.RaftInternal/AddVoter"
-	RaftInternal_RemoveServer_FullMethodName                 = "/apiary.internal.v1.RaftInternal/RemoveServer"
-	RaftInternal_GetVM_FullMethodName                        = "/apiary.internal.v1.RaftInternal/GetVM"
-	RaftInternal_ListVMs_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ListVMs"
-	RaftInternal_GetNetwork_FullMethodName                   = "/apiary.internal.v1.RaftInternal/GetNetwork"
-	RaftInternal_ListNetworks_FullMethodName                 = "/apiary.internal.v1.RaftInternal/ListNetworks"
-	RaftInternal_ListVMsLocal_FullMethodName                 = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
-	RaftInternal_ListNetworksLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
-	RaftInternal_ValidateAPIKeyHash_FullMethodName           = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
-	RaftInternal_ListAPIKeys_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
-	RaftInternal_GetJail_FullMethodName                      = "/apiary.internal.v1.RaftInternal/GetJail"
-	RaftInternal_ListJails_FullMethodName                    = "/apiary.internal.v1.RaftInternal/ListJails"
-	RaftInternal_ListJailsLocal_FullMethodName               = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
-	RaftInternal_ExportState_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ExportState"
-	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
-	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
-	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
-	RaftInternal_GetColonyJoinWindowLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
-	RaftInternal_GetColonyDiskSizeLocal_FullMethodName       = "/apiary.internal.v1.RaftInternal/GetColonyDiskSizeLocal"
-	RaftInternal_ListTrustedPeersLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
-	RaftInternal_GetAuthorizationUse_FullMethodName          = "/apiary.internal.v1.RaftInternal/GetAuthorizationUse"
-	RaftInternal_GetColonyUpdateStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
-	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
+	RaftInternal_Apply_FullMethodName                            = "/apiary.internal.v1.RaftInternal/Apply"
+	RaftInternal_Status_FullMethodName                           = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_AddVoter_FullMethodName                         = "/apiary.internal.v1.RaftInternal/AddVoter"
+	RaftInternal_RemoveServer_FullMethodName                     = "/apiary.internal.v1.RaftInternal/RemoveServer"
+	RaftInternal_GetVM_FullMethodName                            = "/apiary.internal.v1.RaftInternal/GetVM"
+	RaftInternal_ListVMs_FullMethodName                          = "/apiary.internal.v1.RaftInternal/ListVMs"
+	RaftInternal_GetNetwork_FullMethodName                       = "/apiary.internal.v1.RaftInternal/GetNetwork"
+	RaftInternal_ListNetworks_FullMethodName                     = "/apiary.internal.v1.RaftInternal/ListNetworks"
+	RaftInternal_ListVMsLocal_FullMethodName                     = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
+	RaftInternal_ListNetworksLocal_FullMethodName                = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
+	RaftInternal_ValidateAPIKeyHash_FullMethodName               = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
+	RaftInternal_ListAPIKeys_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
+	RaftInternal_GetJail_FullMethodName                          = "/apiary.internal.v1.RaftInternal/GetJail"
+	RaftInternal_ListJails_FullMethodName                        = "/apiary.internal.v1.RaftInternal/ListJails"
+	RaftInternal_ListJailsLocal_FullMethodName                   = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
+	RaftInternal_ExportState_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ExportState"
+	RaftInternal_GetPendingJoinRequestLocal_FullMethodName       = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
+	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
+	RaftInternal_GetRestartLeaseStateLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
+	RaftInternal_GetColonyJoinWindowLocal_FullMethodName         = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
+	RaftInternal_GetColonyDiskSizeLocal_FullMethodName           = "/apiary.internal.v1.RaftInternal/GetColonyDiskSizeLocal"
+	RaftInternal_ListTrustedPeersLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
+	RaftInternal_ListCertificateReservationsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListCertificateReservationsLocal"
+	RaftInternal_GetAuthorizationUse_FullMethodName              = "/apiary.internal.v1.RaftInternal/GetAuthorizationUse"
+	RaftInternal_GetColonyUpdateStateLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
+	RaftInternal_StepAsideForRestartLocal_FullMethodName         = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -189,6 +190,18 @@ type RaftInternalClient interface {
 	// writes are the same on every Comb and an operator can diff two
 	// hosts.
 	ListTrustedPeersLocal(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error)
+	// ListCertificateReservationsLocal is the read side of ADR-0171's
+	// prepared-certificate reservations.
+	//
+	// Deliberately NOT leader-only, for the same
+	// ListTrustedPeersLocal reason: the reservations are already
+	// raft-replicated, so any node can answer for itself. A follower
+	// answering from its own copy is the same copy the leader would
+	// have answered from, because both are the committed state.
+	//
+	// Sorted by reservation ID, so two Combs listing the same
+	// reservations list them in the same order.
+	ListCertificateReservationsLocal(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error)
 	// GetAuthorizationUse reports which request, if any, has already
 	// SPENT a given root-owned authorization entry (ADR-0147 Part 3).
 	//
@@ -475,6 +488,16 @@ func (c *raftInternalClient) ListTrustedPeersLocal(ctx context.Context, in *List
 	return out, nil
 }
 
+func (c *raftInternalClient) ListCertificateReservationsLocal(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCertificateReservationsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListCertificateReservationsLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) GetAuthorizationUse(ctx context.Context, in *GetAuthorizationUseRequest, opts ...grpc.CallOption) (*GetAuthorizationUseResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetAuthorizationUseResponse)
@@ -648,6 +671,18 @@ type RaftInternalServer interface {
 	// writes are the same on every Comb and an operator can diff two
 	// hosts.
 	ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error)
+	// ListCertificateReservationsLocal is the read side of ADR-0171's
+	// prepared-certificate reservations.
+	//
+	// Deliberately NOT leader-only, for the same
+	// ListTrustedPeersLocal reason: the reservations are already
+	// raft-replicated, so any node can answer for itself. A follower
+	// answering from its own copy is the same copy the leader would
+	// have answered from, because both are the committed state.
+	//
+	// Sorted by reservation ID, so two Combs listing the same
+	// reservations list them in the same order.
+	ListCertificateReservationsLocal(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error)
 	// GetAuthorizationUse reports which request, if any, has already
 	// SPENT a given root-owned authorization entry (ADR-0147 Part 3).
 	//
@@ -779,6 +814,9 @@ func (UnimplementedRaftInternalServer) GetColonyDiskSizeLocal(context.Context, *
 }
 func (UnimplementedRaftInternalServer) ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTrustedPeersLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) ListCertificateReservationsLocal(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCertificateReservationsLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) GetAuthorizationUse(context.Context, *GetAuthorizationUseRequest) (*GetAuthorizationUseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAuthorizationUse not implemented")
@@ -1206,6 +1244,24 @@ func _RaftInternal_ListTrustedPeersLocal_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_ListCertificateReservationsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCertificateReservationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListCertificateReservationsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListCertificateReservationsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListCertificateReservationsLocal(ctx, req.(*ListCertificateReservationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_GetAuthorizationUse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAuthorizationUseRequest)
 	if err := dec(in); err != nil {
@@ -1354,6 +1410,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTrustedPeersLocal",
 			Handler:    _RaftInternal_ListTrustedPeersLocal_Handler,
+		},
+		{
+			MethodName: "ListCertificateReservationsLocal",
+			Handler:    _RaftInternal_ListCertificateReservationsLocal_Handler,
 		},
 		{
 			MethodName: "GetAuthorizationUse",

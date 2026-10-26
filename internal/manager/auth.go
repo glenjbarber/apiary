@@ -365,6 +365,21 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition":  RoleAdmin,
 
+	// PrepareCertificateReservation/DropCertificateReservation
+	// (ADR-0171) are Admin because a preparation is a standing
+	// record about which certificate this Colony holds for a Comb
+	// that has not joined - and because the DELIVERY of that
+	// certificate is gated on the join flow's own approval, which is
+	// itself Admin.
+	//
+	// ListCertificateReservations is Viewer: it is a READ of metadata
+	// that carries no key material, and an operator seeing which
+	// preparations exist is not the same thing as being able to
+	// collect one.
+	"/apiary.rpc.v1.ManagerService/PrepareCertificateReservation": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/DropCertificateReservation":    RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ListCertificateReservations":   RoleViewer,
+
 	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
 	// live dial to a caller-influenced address (only a local raft-
 	// internal state read) - Viewer-tier, matching

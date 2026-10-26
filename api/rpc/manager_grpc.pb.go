@@ -131,6 +131,9 @@ const (
 	ManagerService_TransitionPeerCertificate_FullMethodName           = "/apiary.rpc.v1.ManagerService/TransitionPeerCertificate"
 	ManagerService_ActivatePeerCertificateTransition_FullMethodName   = "/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition"
 	ManagerService_AbandonPeerCertificateTransition_FullMethodName    = "/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition"
+	ManagerService_PrepareCertificateReservation_FullMethodName       = "/apiary.rpc.v1.ManagerService/PrepareCertificateReservation"
+	ManagerService_ListCertificateReservations_FullMethodName         = "/apiary.rpc.v1.ManagerService/ListCertificateReservations"
+	ManagerService_DropCertificateReservation_FullMethodName          = "/apiary.rpc.v1.ManagerService/DropCertificateReservation"
 	ManagerService_PreflightApproveJoinRequest_FullMethodName         = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName                    = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
@@ -985,6 +988,25 @@ type ManagerServiceClient interface {
 	TransitionPeerCertificate(ctx context.Context, in *TransitionPeerCertificateRequest, opts ...grpc.CallOption) (*TransitionPeerCertificateResponse, error)
 	ActivatePeerCertificateTransition(ctx context.Context, in *ActivatePeerCertificateTransitionRequest, opts ...grpc.CallOption) (*ActivatePeerCertificateTransitionResponse, error)
 	AbandonPeerCertificateTransition(ctx context.Context, in *AbandonPeerCertificateTransitionRequest, opts ...grpc.CallOption) (*AbandonPeerCertificateTransitionResponse, error)
+	// PrepareCertificateReservation/ListCertificateReservations/
+	// DropCertificateReservation are ADR-0171's prepared-certificate
+	// reservations: a certificate prepared for a Comb that has not
+	// joined yet, and the record that says so.
+	//
+	// The prepared CERTIFICATE is not carried on these calls. It stays in
+	// the preparing Comb's protected store and is sealed to the joining
+	// Comb at delivery time, so no private key travels through the RPC
+	// surface, through replicated state, or through a log line.
+	//
+	// The DELIVERY is not one of these calls either: it happens through
+	// the join flow's own GetJoinRequestStatus poll, which is where the
+	// joining Comb's certificate is already presented and where the
+	// Colony already releases a sealed credential bundle. A prepared
+	// certificate rides the same channel, sealed the same way, bound by
+	// the same associated-data discipline.
+	PrepareCertificateReservation(ctx context.Context, in *PrepareCertificateReservationRequest, opts ...grpc.CallOption) (*PrepareCertificateReservationResponse, error)
+	ListCertificateReservations(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error)
+	DropCertificateReservation(ctx context.Context, in *DropCertificateReservationRequest, opts ...grpc.CallOption) (*DropCertificateReservationResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -2228,6 +2250,36 @@ func (c *managerServiceClient) AbandonPeerCertificateTransition(ctx context.Cont
 	return out, nil
 }
 
+func (c *managerServiceClient) PrepareCertificateReservation(ctx context.Context, in *PrepareCertificateReservationRequest, opts ...grpc.CallOption) (*PrepareCertificateReservationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareCertificateReservationResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PrepareCertificateReservation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListCertificateReservations(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCertificateReservationsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListCertificateReservations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DropCertificateReservation(ctx context.Context, in *DropCertificateReservationRequest, opts ...grpc.CallOption) (*DropCertificateReservationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DropCertificateReservationResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DropCertificateReservation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PreflightApproveJoinRequestResponse)
@@ -3170,6 +3222,25 @@ type ManagerServiceServer interface {
 	TransitionPeerCertificate(context.Context, *TransitionPeerCertificateRequest) (*TransitionPeerCertificateResponse, error)
 	ActivatePeerCertificateTransition(context.Context, *ActivatePeerCertificateTransitionRequest) (*ActivatePeerCertificateTransitionResponse, error)
 	AbandonPeerCertificateTransition(context.Context, *AbandonPeerCertificateTransitionRequest) (*AbandonPeerCertificateTransitionResponse, error)
+	// PrepareCertificateReservation/ListCertificateReservations/
+	// DropCertificateReservation are ADR-0171's prepared-certificate
+	// reservations: a certificate prepared for a Comb that has not
+	// joined yet, and the record that says so.
+	//
+	// The prepared CERTIFICATE is not carried on these calls. It stays in
+	// the preparing Comb's protected store and is sealed to the joining
+	// Comb at delivery time, so no private key travels through the RPC
+	// surface, through replicated state, or through a log line.
+	//
+	// The DELIVERY is not one of these calls either: it happens through
+	// the join flow's own GetJoinRequestStatus poll, which is where the
+	// joining Comb's certificate is already presented and where the
+	// Colony already releases a sealed credential bundle. A prepared
+	// certificate rides the same channel, sealed the same way, bound by
+	// the same associated-data discipline.
+	PrepareCertificateReservation(context.Context, *PrepareCertificateReservationRequest) (*PrepareCertificateReservationResponse, error)
+	ListCertificateReservations(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error)
+	DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -3616,6 +3687,15 @@ func (UnimplementedManagerServiceServer) ActivatePeerCertificateTransition(conte
 }
 func (UnimplementedManagerServiceServer) AbandonPeerCertificateTransition(context.Context, *AbandonPeerCertificateTransitionRequest) (*AbandonPeerCertificateTransitionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AbandonPeerCertificateTransition not implemented")
+}
+func (UnimplementedManagerServiceServer) PrepareCertificateReservation(context.Context, *PrepareCertificateReservationRequest) (*PrepareCertificateReservationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrepareCertificateReservation not implemented")
+}
+func (UnimplementedManagerServiceServer) ListCertificateReservations(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCertificateReservations not implemented")
+}
+func (UnimplementedManagerServiceServer) DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DropCertificateReservation not implemented")
 }
 func (UnimplementedManagerServiceServer) PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightApproveJoinRequest not implemented")
@@ -5640,6 +5720,60 @@ func _ManagerService_AbandonPeerCertificateTransition_Handler(srv interface{}, c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_PrepareCertificateReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareCertificateReservationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PrepareCertificateReservation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PrepareCertificateReservation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PrepareCertificateReservation(ctx, req.(*PrepareCertificateReservationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListCertificateReservations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCertificateReservationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListCertificateReservations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListCertificateReservations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListCertificateReservations(ctx, req.(*ListCertificateReservationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DropCertificateReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropCertificateReservationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DropCertificateReservation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DropCertificateReservation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DropCertificateReservation(ctx, req.(*DropCertificateReservationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_PreflightApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PreflightApproveJoinRequestRequest)
 	if err := dec(in); err != nil {
@@ -6258,6 +6392,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AbandonPeerCertificateTransition",
 			Handler:    _ManagerService_AbandonPeerCertificateTransition_Handler,
+		},
+		{
+			MethodName: "PrepareCertificateReservation",
+			Handler:    _ManagerService_PrepareCertificateReservation_Handler,
+		},
+		{
+			MethodName: "ListCertificateReservations",
+			Handler:    _ManagerService_ListCertificateReservations_Handler,
+		},
+		{
+			MethodName: "DropCertificateReservation",
+			Handler:    _ManagerService_DropCertificateReservation_Handler,
 		},
 		{
 			MethodName: "PreflightApproveJoinRequest",

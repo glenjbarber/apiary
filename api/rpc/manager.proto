@@ -906,6 +906,26 @@ service ManagerService {
   rpc ActivatePeerCertificateTransition(ActivatePeerCertificateTransitionRequest) returns (ActivatePeerCertificateTransitionResponse);
   rpc AbandonPeerCertificateTransition(AbandonPeerCertificateTransitionRequest) returns (AbandonPeerCertificateTransitionResponse);
 
+  // PrepareCertificateReservation/ListCertificateReservations/
+  // DropCertificateReservation are ADR-0171's prepared-certificate
+  // reservations: a certificate prepared for a Comb that has not
+  // joined yet, and the record that says so.
+  //
+  // The prepared CERTIFICATE is not carried on these calls. It stays in
+  // the preparing Comb's protected store and is sealed to the joining
+  // Comb at delivery time, so no private key travels through the RPC
+  // surface, through replicated state, or through a log line.
+  //
+  // The DELIVERY is not one of these calls either: it happens through
+  // the join flow's own GetJoinRequestStatus poll, which is where the
+  // joining Comb's certificate is already presented and where the
+  // Colony already releases a sealed credential bundle. A prepared
+  // certificate rides the same channel, sealed the same way, bound by
+  // the same associated-data discipline.
+  rpc PrepareCertificateReservation(PrepareCertificateReservationRequest) returns (PrepareCertificateReservationResponse);
+  rpc ListCertificateReservations(ListCertificateReservationsRequest) returns (ListCertificateReservationsResponse);
+  rpc DropCertificateReservation(DropCertificateReservationRequest) returns (DropCertificateReservationResponse);
+
   // PreflightApproveJoinRequest previews ApproveJoinRequest's own
   // reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
   // Admin-tier, not Viewer, because it makes managerd dial a
@@ -4226,6 +4246,17 @@ message GetJoinRequestStatusRequest {
   // certificate recorded on this request. The target seals approved join
   // credentials to this key; this field is public material, not a secret.
   string recipient_tls_certificate_pem = 4;
+
+  // prepared_certificate_reservation_id is ADR-0171's reservation the
+  // joining Comb is collecting.
+  //
+  // It is presented by the joiner and CHECKED against the
+  // reservation's own binding: the reservation must be bound to this
+  // request and to this Comb. Presenting an identifier is not
+  // authority to collect anything - the envelope is sealed to the
+  // joiner's certificate, and the seal is what authorizes the
+  // collection.
+  string prepared_certificate_reservation_id = 5;
 }
 
 message GetJoinRequestStatusResponse {
@@ -4264,6 +4295,34 @@ message GetJoinRequestStatusResponse {
   // keys and restart-guardrail tokens are never carried in this response or
   // in replicated state.
   bytes sealed_credentials = 5;
+
+  // sealed_prepared_certificate is ADR-0171's prepared certificate,
+  // delivered over the same channel and by the same rules as
+  // sealed_credentials above.
+  //
+  // It is a SEPARATE field rather than another member of the existing
+  // credential bundle, because that bundle is versioned: adding a
+  // field to it would mean every joiner that already understands
+  // version 1 would meet a version 2 it does not. A separate field
+  // leaves the credential bundle's contract untouched, and a joiner
+  // that does not know about prepared certificates simply never
+  // receives one.
+  //
+  // Present only for an approved request whose reservation is bound
+  // to this request and to this Comb. The envelope is sealed to the
+  // joining Comb's own serving certificate, and its associated data
+  // binds it to the reservation, the request, the node and the
+  // certificate's fingerprint - so a ciphertext copied from one
+  // reservation's delivery cannot be opened under another's.
+  bytes sealed_prepared_certificate = 6;
+
+  // prepared_certificate_reservation_id names the reservation the
+  // field above carries, so the joiner knows which delivery this is
+  // and can refuse one that is not the reservation it presented.
+  //
+  // It is NOT secret: it is an identifier, and the envelope's
+  // associated data binds it in.
+  string prepared_certificate_reservation_id = 7;
 }
 
 message GetMemberRestartGuardrailCredentialRequest {
@@ -4292,6 +4351,16 @@ message ListJoinRequestsResponse {
 message ApproveJoinRequestRequest {
   string request_id = 1;
   uint32 timeout_ms = 2;
+
+  // prepared_certificate_reservation_id is ADR-0171's reservation, to
+  // be bound to this request and this Comb by the approval itself.
+  //
+  // Empty means no prepared certificate is involved, which is the
+  // ordinary case. When it is set, the approval is REFUSED if the
+  // reservation does not exist, has already been delivered, or is
+  // already bound elsewhere - a preparation that stays unbound is one
+  // nobody can collect and nobody can clear.
+  string prepared_certificate_reservation_id = 8;
 
   // confirm_phrase (ADR-0113) must exactly equal the server's own
   // required phrase ("yes-trust-new-comb") or the whole call is refused
@@ -4398,6 +4467,27 @@ message ReissueJoinSecondPinResponse {
   uint32 reissues_remaining = 4;
 }
 
+// CertificateReservation mirrors internalpb.CertificateReservation
+// (ADR-0171) - a certificate prepared for a Comb that has not joined
+// the Colony yet.
+//
+// It is METADATA, not key material: it names a FQDN, a fingerprint,
+// and the joining Comb and request it has been bound to. The prepared
+// certificate's PRIVATE KEY never appears in this record, and never
+// appears in replicated state.
+message CertificateReservation {
+  string reservation_id = 1;
+  string fqdn = 2;
+  string fingerprint = 3;
+  string node_id = 4;
+  string request_id = 5;
+  int64 created_at_unix = 6;
+  int64 expires_at_unix = 7;
+  int64 bound_at_unix = 8;
+  int64 delivered_at_unix = 9;
+  string prepared_by = 10;
+}
+
 // TrustedPeer mirrors internalpb.TrustedPeer (ADR-0147 Part 4) - one
 // Comb's serving certificate, pinned by this Colony. See there for what
 // each field means and, in particular, for why is_voter is a separate
@@ -4494,6 +4584,68 @@ message AbandonPeerCertificateTransitionResponse {
   TrustedPeer peer = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// PrepareCertificateReservationRequest records that a certificate has
+// been prepared for a Comb that has not joined yet.
+//
+// The certificate itself is NOT carried here. It stays in the
+// preparing Comb's protected store; this call records only WHICH
+// certificate, for WHICH name, so that the join flow can seal it to
+// the joining Comb later.
+message PrepareCertificateReservationRequest {
+  // fqdn is the name the certificate was issued for.
+  string fqdn = 1;
+
+  // fingerprint is the hostcert digest of the prepared certificate. It
+  // is RE-DERIVED by managerd from the certificate the operator names,
+  // so a caller that supplies a wrong one has it corrected rather than
+  // stored.
+  string fingerprint = 2;
+
+  // cert_pem is the prepared certificate. It is PUBLIC material - it
+  // is the certificate, not its key - and it is needed here so that
+  // managerd can re-derive the fingerprint from the bytes rather than
+  // trusting the caller's claim about them.
+  //
+  // The PRIVATE KEY is not carried here and never is: it stays in the
+  // preparing Comb's protected store and is sealed to the joining
+  // Comb at delivery time.
+  string cert_pem = 3;
+
+  // validity_seconds is how long the preparation stays deliverable. It
+  // is bounded, because an unbounded preparation holds a prepared key
+  // indefinitely.
+  int64 validity_seconds = 4;
+
+  // reservation_id is the operator's identifier for this preparation.
+  // It must be unguessable, because it is what the joining Comb
+  // presents to collect the material.
+  string reservation_id = 5;
+}
+
+message PrepareCertificateReservationResponse {
+  CertificateReservation reservation = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message ListCertificateReservationsRequest {}
+
+message ListCertificateReservationsResponse {
+  repeated CertificateReservation reservations = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message DropCertificateReservationRequest {
+  string reservation_id = 1;
+  string reason = 2;
+}
+
+message DropCertificateReservationResponse {
+  string error = 1;
+  string leader_hint = 2;
 }
 
 message UnpinPeerCertificateRequest {
