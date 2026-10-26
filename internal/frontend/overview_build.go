@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,8 +31,11 @@ type overviewBundle struct {
 	Chip      overviewHealthChip
 	Attention []overviewAttentionItem
 	Combs     overviewCombView
-	// ColonyName is the Colony's name for the top bar.
-	ColonyName string
+	// ColonyName is the Colony's name for the top bar, short enough
+	// to sit on one line. ColonyNameFull is the identifier it was
+	// taken from, for the title attribute; see colonyTitle.
+	ColonyName     string
+	ColonyNameFull string
 	// Warnings is the warning count, which the status line shows and
 	// the chip deliberately does not (handoff 7.1).
 	Warnings int
@@ -55,16 +59,7 @@ func (s *Server) gatherOverview(ctx context.Context, r *http.Request, statusResp
 		bundle.Error = statusErr.Error()
 	}
 	if statusResp != nil {
-		bundle.ColonyName = statusResp.GetRaftColonyId()
-	}
-	if bundle.ColonyName == "" {
-		// A Colony with no identity yet is a real state, not an error
-		// (raft_colony_id is empty until a node has a Colony
-		// identity). The top bar names the Comb that is answering
-		// instead, so the bar is never blank.
-		if statusResp != nil {
-			bundle.ColonyName = statusResp.GetManagerNodeId()
-		}
+		bundle.ColonyName, bundle.ColonyNameFull = colonyTitle(statusResp.GetRaftColonyId(), statusResp.GetManagerNodeId())
 	}
 
 	localNodeID := ""
@@ -139,4 +134,30 @@ func (s *Server) gatherOverview(ctx context.Context, r *http.Request, statusResp
 	bundle.Chip = overviewChipFrom(nodes, bundle.Warnings, statusResp != nil, statusErr)
 	bundle.Attention = s.overviewAttentionFrom(r, s.overviewCanAdmin(r), nodes, bundle.Combs, index, leader, now)
 	return bundle
+}
+
+// colonyTitle returns the top bar's Colony name and the full identifier
+// behind it.
+//
+// A Colony has no human-chosen name today, only raft_colony_id, which
+// is a UUID. Shown whole, a UUID is 36 characters of noise in the one
+// place the operator looks first, so the bar shows "Colony" and the
+// UUID's first group ("Colony e5130fb4"), and the title attribute
+// carries the whole ID for anyone who needs to match it.
+//
+// A Colony with no identity yet is a real state, not an error
+// (raft_colony_id is empty until a node has a Colony identity). The
+// bar then names the Comb that is answering, so it is never blank.
+func colonyTitle(colonyID, nodeID string) (name, full string) {
+	if colonyID == "" {
+		return nodeID, nodeID
+	}
+	short := colonyID
+	if i := strings.IndexByte(short, '-'); i > 0 {
+		short = short[:i]
+	}
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	return "Colony " + short, colonyID
 }

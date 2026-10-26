@@ -146,9 +146,19 @@
       display:flex; align-items:center; gap:12px; min-width:0;
       padding:14px 34px 0;
     }
-    .topbar-title { margin:0; font-size:18px; font-weight:600; color:var(--ink); overflow-wrap:anywhere; }
+    /* One line, always. The title used to be allowed to wrap anywhere,
+       and the fixed-width items beside it squeezed it to its min-content
+       width, so it stacked a few characters per line down the page. It
+       now truncates with an ellipsis (the full name is in the title
+       attribute), and min-width keeps a crowded bar from shrinking it to
+       nothing; the search box gives up width first. */
+    .topbar-title {
+      margin:0; font-size:18px; font-weight:600; color:var(--ink);
+      flex:0 1 auto; min-width:9rem; max-width:24rem;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
     .topbar-search {
-      margin-left:auto; width:300px; height:30px; flex:none;
+      margin-left:auto; height:30px; flex:0 1 300px; min-width:10rem;
       display:flex; align-items:center; justify-content:space-between;
       padding:0 10px; border:1px solid var(--line); border-radius:var(--radius);
       color:var(--faint); font-size:13px; cursor:text; background:transparent;
@@ -728,7 +738,7 @@
       .app-footer { grid-column:1; grid-row:4; }
       .topbar-main { padding:10px 14px 0; flex-wrap:wrap; }
       .topbar-title { font-size:16px; }
-      .topbar-search { width:100%; margin-left:0; order:3; }
+      .topbar-search { flex:1 1 100%; margin-left:0; order:3; }
       .tabs { padding:0 14px; gap:16px; }
       /* Under 620px the cards go to one column, and the table hides
          Uptime and ZFS (handoff 12). */
@@ -802,7 +812,7 @@
 </nav>
 <header class="topbar">
   <div class="topbar-main">
-    <h1 class="topbar-title">{{with .Overview.ColonyName}}{{.}}{{else}}Apiary{{end}}</h1>
+    <h1 class="topbar-title"{{with .Overview.ColonyNameFull}} title="{{.}}"{{end}}>{{with .Overview.ColonyName}}{{.}}{{else}}Apiary{{end}}</h1>
     {{/*
       The Colony-leader indicator (ADR-0123). It stays in the top bar
       because it is a fact every page needs and it must name the node
