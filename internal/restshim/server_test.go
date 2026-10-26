@@ -770,6 +770,13 @@ func (f *fakeClient) IssuePreparedCertificate(context.Context, *rpcpb.IssuePrepa
 	return &rpcpb.IssuePreparedCertificateResponse{}, nil
 }
 
+// ListTrustedPeers - the peer trust store's read side (ADR-0177).
+func (f *fakeClient) ListTrustedPeers(context.Context, *rpcpb.ListTrustedPeersRequest, ...grpc.CallOption) (*rpcpb.ListTrustedPeersResponse, error) {
+	return &rpcpb.ListTrustedPeersResponse{}, nil
+}
+
+// TransitionPeerCertificate and its two companions - ADR-0170's trust
+// transition.
 // RequestManagerdRestart and IssueManagerdRestart are ADR-0146's
 // managerd self-restart handoff. Nothing in this package's request path
 // calls either - there is deliberately no UI control and no REST route

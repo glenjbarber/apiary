@@ -361,6 +361,16 @@ var requiredRole = map[string]Role{
 	// timer, because the choice between "activate" and "abandon"
 	// depends on facts only an operator or the Colony's own evidence
 	// has.
+	// ListTrustedPeers is Viewer: it is a READ of the trust store.
+	//
+	// Deciding what the Colony TRUSTS is Admin - that is what the
+	// three transition RPCs are for - but SEEING what it trusts is not
+	// a privileged act. An operator who cannot see the trust store
+	// cannot reason about a transition they are being asked to
+	// authorize, so hiding it from a Viewer would make the Admin's
+	// decision less informed, not more.
+	"/apiary.rpc.v1.ManagerService/ListTrustedPeers": RoleViewer,
+
 	"/apiary.rpc.v1.ManagerService/TransitionPeerCertificate":         RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition":  RoleAdmin,

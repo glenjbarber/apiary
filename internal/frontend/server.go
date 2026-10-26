@@ -71,6 +71,18 @@ type pageData struct {
 	// where a real per-Comb StateChip belongs instead.
 	KnownCombs []string
 
+	// TrustStore is ADR-0177's peer trust store: the Colony's pinned
+	// members and any transition in flight among them.
+	TrustStore trustStoreView
+
+	// TrustSuccess/TrustNodeID/TrustAction/TrustReason report the
+	// outcome of a transition attempt, so an operator who changed a
+	// Comb's trust knows whether the change took.
+	TrustSuccess string
+	TrustNodeID  string
+	TrustAction  string
+	TrustReason  string
+
 	// CombTree is the sidebar's Colony tree (ADR-0144's `CombTree`).
 	//
 	// It carries each Comb's MEMBERSHIP - suffrage, address, and
@@ -1148,6 +1160,12 @@ func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	if isSafeLoginReturnPath(r.URL.RequestURI()) && r.Method == http.MethodGet {
 		next = "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 	}
+	// A redirect must not be cached either. A cached redirect to the
+	// login page is what strands a browser there after a frontend
+	// restart - the session store is in-memory, so the restart
+	// invalidated the session, and a cached redirect keeps serving
+	// the login page even after the operator logs in again.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", next)
 		return
@@ -1356,6 +1374,16 @@ func (s *Server) routes() {
 	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	// ADR-0177's operator surface: the Colony's peer trust store, and
+	// the transition that replaces one of its certificates.
+	//
+	// The READ is Viewer, because seeing what the Colony trusts is not
+	// a privileged act - an operator who cannot see the trust store
+	// cannot reason about a transition they are being asked to
+	// authorize. The three WRITES are Admin, because they decide what
+	// the Colony trusts.
+	s.mux.HandleFunc("GET /machine/trust", s.requireRole(manager.RoleViewer, s.handleTrustStorePage))
+	s.mux.HandleFunc("POST /machine/trust/transition", s.requireRole(manager.RoleAdmin, s.handleTrustTransition))
 	// ADR-0163's guided join ledger: a two-column, READ-ONLY view of the
 	// two-way join handshake.
 	//
@@ -3239,6 +3267,24 @@ func (s *Server) renderUserPanelSuccess(w http.ResponseWriter, actorUsername str
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Every page here carries per-operator state - the session's role,
+	// the Colony's health, the operator's own forms - and none of it
+	// may be cached.
+	//
+	// Without this, a browser is free to apply HEURISTIC caching to a
+	// response that carries no Cache-Control at all, and will keep
+	// showing a page that the server has already replaced. That is not
+	// hypothetical here: the templates are compiled into the binary, so
+	// an upgraded frontend serves a DIFFERENT page from the same URL -
+	// and a browser that cached the old one shows the old layout with
+	// no indication that anything is wrong.
+	//
+	// "no-store" rather than "no-cache": no-cache permits a browser to
+	// revalidate, which needs a validator this server does not send, so
+	// it collapses back into heuristic behaviour anyway.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 	}

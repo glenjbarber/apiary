@@ -128,6 +128,7 @@ const (
 	ManagerService_ReissueJoinSecondPin_FullMethodName                = "/apiary.rpc.v1.ManagerService/ReissueJoinSecondPin"
 	ManagerService_PinPeerCertificate_FullMethodName                  = "/apiary.rpc.v1.ManagerService/PinPeerCertificate"
 	ManagerService_UnpinPeerCertificate_FullMethodName                = "/apiary.rpc.v1.ManagerService/UnpinPeerCertificate"
+	ManagerService_ListTrustedPeers_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListTrustedPeers"
 	ManagerService_TransitionPeerCertificate_FullMethodName           = "/apiary.rpc.v1.ManagerService/TransitionPeerCertificate"
 	ManagerService_ActivatePeerCertificateTransition_FullMethodName   = "/apiary.rpc.v1.ManagerService/ActivatePeerCertificateTransition"
 	ManagerService_AbandonPeerCertificateTransition_FullMethodName    = "/apiary.rpc.v1.ManagerService/AbandonPeerCertificateTransition"
@@ -986,6 +987,21 @@ type ManagerServiceClient interface {
 	// Like PinPeerCertificate, none of these can create or modify an
 	// authorization entry, and a pin is not a credential: nothing
 	// authenticates a caller by presenting one.
+	// ListTrustedPeers is the READ side of ADR-0147 Part 4's replicated
+	// peer trust store, and the reason ADR-0177's operator surface can
+	// exist at all.
+	//
+	// It is COLONY-WIDE, unlike ListOriginCertificates and
+	// ListLetsEncryptCertificates, which answer only for the managerd
+	// that receives them: the trust store is raft-replicated, so every
+	// Comb's read of it is the same read. That is why it belongs on its
+	// own page rather than on the Certificates page, which has
+	// deliberately declared itself a single Comb's read-only view.
+	//
+	// It carries no private key and no key path, because the store holds
+	// none - the same reason internal/certmgr's check never opens a
+	// *.key file.
+	ListTrustedPeers(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error)
 	TransitionPeerCertificate(ctx context.Context, in *TransitionPeerCertificateRequest, opts ...grpc.CallOption) (*TransitionPeerCertificateResponse, error)
 	ActivatePeerCertificateTransition(ctx context.Context, in *ActivatePeerCertificateTransitionRequest, opts ...grpc.CallOption) (*ActivatePeerCertificateTransitionResponse, error)
 	AbandonPeerCertificateTransition(ctx context.Context, in *AbandonPeerCertificateTransitionRequest, opts ...grpc.CallOption) (*AbandonPeerCertificateTransitionResponse, error)
@@ -2238,6 +2254,16 @@ func (c *managerServiceClient) UnpinPeerCertificate(ctx context.Context, in *Unp
 	return out, nil
 }
 
+func (c *managerServiceClient) ListTrustedPeers(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTrustedPeersResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListTrustedPeers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) TransitionPeerCertificate(ctx context.Context, in *TransitionPeerCertificateRequest, opts ...grpc.CallOption) (*TransitionPeerCertificateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TransitionPeerCertificateResponse)
@@ -3247,6 +3273,21 @@ type ManagerServiceServer interface {
 	// Like PinPeerCertificate, none of these can create or modify an
 	// authorization entry, and a pin is not a credential: nothing
 	// authenticates a caller by presenting one.
+	// ListTrustedPeers is the READ side of ADR-0147 Part 4's replicated
+	// peer trust store, and the reason ADR-0177's operator surface can
+	// exist at all.
+	//
+	// It is COLONY-WIDE, unlike ListOriginCertificates and
+	// ListLetsEncryptCertificates, which answer only for the managerd
+	// that receives them: the trust store is raft-replicated, so every
+	// Comb's read of it is the same read. That is why it belongs on its
+	// own page rather than on the Certificates page, which has
+	// deliberately declared itself a single Comb's read-only view.
+	//
+	// It carries no private key and no key path, because the store holds
+	// none - the same reason internal/certmgr's check never opens a
+	// *.key file.
+	ListTrustedPeers(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error)
 	TransitionPeerCertificate(context.Context, *TransitionPeerCertificateRequest) (*TransitionPeerCertificateResponse, error)
 	ActivatePeerCertificateTransition(context.Context, *ActivatePeerCertificateTransitionRequest) (*ActivatePeerCertificateTransitionResponse, error)
 	AbandonPeerCertificateTransition(context.Context, *AbandonPeerCertificateTransitionRequest) (*AbandonPeerCertificateTransitionResponse, error)
@@ -3723,6 +3764,9 @@ func (UnimplementedManagerServiceServer) PinPeerCertificate(context.Context, *Pi
 }
 func (UnimplementedManagerServiceServer) UnpinPeerCertificate(context.Context, *UnpinPeerCertificateRequest) (*UnpinPeerCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UnpinPeerCertificate not implemented")
+}
+func (UnimplementedManagerServiceServer) ListTrustedPeers(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTrustedPeers not implemented")
 }
 func (UnimplementedManagerServiceServer) TransitionPeerCertificate(context.Context, *TransitionPeerCertificateRequest) (*TransitionPeerCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransitionPeerCertificate not implemented")
@@ -5714,6 +5758,24 @@ func _ManagerService_UnpinPeerCertificate_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ListTrustedPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTrustedPeersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListTrustedPeers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListTrustedPeers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListTrustedPeers(ctx, req.(*ListTrustedPeersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_TransitionPeerCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TransitionPeerCertificateRequest)
 	if err := dec(in); err != nil {
@@ -6446,6 +6508,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UnpinPeerCertificate",
 			Handler:    _ManagerService_UnpinPeerCertificate_Handler,
+		},
+		{
+			MethodName: "ListTrustedPeers",
+			Handler:    _ManagerService_ListTrustedPeers_Handler,
 		},
 		{
 			MethodName: "TransitionPeerCertificate",
