@@ -47,6 +47,7 @@
 //	/usr/local/libexec/apiary/apiaryctl migrate-tls-dir [--apply]
 //	/usr/local/libexec/apiary/apiaryctl colony-ca init [--dir DIR]
 //	/usr/local/libexec/apiary/apiaryctl colony-ca issue-raft --name HOST [--ip IP]...
+//	/usr/local/libexec/apiary/apiaryctl cert-setup [setup|prepare|status]
 //	/usr/local/libexec/apiary/apiaryctl help
 package main
 
@@ -117,6 +118,13 @@ Usage:
                             sign this Comb's raft certificate with the
                             Colony CA: raft.pem and raft.key. Refuses to
                             overwrite. Root only, changes no config
+  apiaryctl cert-setup      guided Cloudflare setup and certificate
+                            issuance. Enters the Cloudflare integration
+                            with a masked token, validates it against the
+                            zone, and obtains a certificate - for this
+                            Comb, or for one that has not joined yet.
+                            Root only; the token is never echoed or
+                            printed
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -182,6 +190,8 @@ func main() {
 		os.Exit(runMigrateTLSDir(args[1:]))
 	case "colony-ca":
 		os.Exit(runColonyCA(args[1:]))
+	case "cert-setup":
+		os.Exit(runCertSetup(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)

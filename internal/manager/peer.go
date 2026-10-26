@@ -1198,6 +1198,17 @@ func (p *PeerReporter) DropCertificateReservation(ctx context.Context, addr stri
 	return client.DropCertificateReservation(ctx, req)
 }
 
+// IssuePreparedCertificate forwards to the leader, for the same
+// reason: it records a reservation, which is replicated state.
+func (p *PeerReporter) IssuePreparedCertificate(ctx context.Context, addr string, req *rpcpb.IssuePreparedCertificateRequest) (*rpcpb.IssuePreparedCertificateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.IssuePreparedCertificate(ctx, req)
+}
+
 // OpenColonyJoinWindow/CloseColonyJoinWindow forward on a leader-hint
 // rejection, mirroring ApproveJoinRequest above exactly (ADR-0147
 // Part 4). addr is this node's own trusted, internally-derived notion

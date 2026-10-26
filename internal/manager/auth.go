@@ -377,8 +377,13 @@ var requiredRole = map[string]Role{
 	// preparations exist is not the same thing as being able to
 	// collect one.
 	"/apiary.rpc.v1.ManagerService/PrepareCertificateReservation": RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/DropCertificateReservation":    RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ListCertificateReservations":   RoleViewer,
+	// IssuePreparedCertificate issues a certificate for a Comb that has
+	// not joined yet, and generates a private key for it. It is Admin
+	// for the same reason the two calls above are: it issues a
+	// credential and records a standing preparation.
+	"/apiary.rpc.v1.ManagerService/IssuePreparedCertificate":    RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/DropCertificateReservation":  RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ListCertificateReservations": RoleViewer,
 
 	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
 	// live dial to a caller-influenced address (only a local raft-

@@ -766,6 +766,10 @@ func (f *fakeClient) DropCertificateReservation(context.Context, *rpcpb.DropCert
 	return &rpcpb.DropCertificateReservationResponse{}, nil
 }
 
+func (f *fakeClient) IssuePreparedCertificate(context.Context, *rpcpb.IssuePreparedCertificateRequest, ...grpc.CallOption) (*rpcpb.IssuePreparedCertificateResponse, error) {
+	return &rpcpb.IssuePreparedCertificateResponse{}, nil
+}
+
 // RequestManagerdRestart and IssueManagerdRestart are ADR-0146's
 // managerd self-restart handoff. Nothing in this package's request path
 // calls either - there is deliberately no UI control and no REST route
