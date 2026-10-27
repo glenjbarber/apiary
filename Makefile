@@ -79,22 +79,6 @@ SRCS=		apiaryinstall \
 BUILD_ID?=	# empty: computed by scripts/build-ldflags.sh
 BUILD_TIME?=	# empty: the commit's date, likewise computed there
 
-# VERSION is the release version the binaries will report in their
-# -version output. It is computed by scripts/build-ldflags.sh like the
-# other two, and empty here means "work it out from the checkout":
-# the tag on HEAD, or "devel" for an untagged commit.
-#
-# A release build pins it, so the binary and the tag can be checked
-# against each other:
-#
-#	make build VERSION=1.0.0-alpha
-#
-# It is deliberately NOT a clock. A version that changed on every build
-# would make two builds of one commit differ, and would break the
-# reproducibility that `make check-reproducible` proves. The version is
-# a property of the source, so it is read from the source's own tag.
-VERSION?=	# empty: computed by scripts/build-ldflags.sh
-
 BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
 LDFLAGS_SH=	scripts/build-ldflags.sh
 VERDICT_SH=	scripts/stamp-verdict.sh
@@ -121,7 +105,7 @@ PAM_SERVICE=	apiary
 build:
 	set -e; \
 	for S in ${SRCS} ; \
-		do ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' VERSION='$(VERSION)' ${LDFLAGS_SH}` ; \
+		do ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH}` ; \
 		$(GO_BUILD) -ldflags "$$ldflags" -o $$S ./cmd/$$S ;\
 	done
 
@@ -144,7 +128,7 @@ check-ldflags:
 	@set -e; \
 	out=`${LDFLAGS_SH}` ; \
 	echo "raw: $$out" ; \
-	for V in BuildID BuildTime GitCommit Version ; do \
+	for V in BuildID BuildTime GitCommit ; do \
 		val=`echo "$$out" | tr ' ' '\n' | sed -n "s/.*\.$$V=//p"` ; \
 		if [ -z "$$val" ] ; then \
 			echo "$$V is empty or missing in: $$out" >&2 ; exit 1 ; \
@@ -156,11 +140,6 @@ check-ldflags:
 	case "$$id" in "$$short"|"$$short-dirty") ;; \
 		*) echo "id $$id does not derive from commit $$short" >&2 ; exit 1 ;; \
 	esac ; \
-	ver=`${LDFLAGS_SH} --version` ; \
-	if [ -z "$$ver" ] ; then \
-		echo "the derived version is empty" >&2 ; exit 1 ; \
-	fi ; \
-	echo "  derived version=$$ver" ; \
 	echo "ldflags ok"
 
 # Refuse to let a binary that cannot name itself reach
@@ -257,7 +236,7 @@ check-stamped:
 # only show up here.
 .PHONY: check-reproducible
 check-reproducible:
-	@ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' VERSION='$(VERSION)' ${LDFLAGS_SH}` ; \
+	@ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH}` ; \
 	$(GO_BUILD) -ldflags "$$ldflags" -o /tmp/apiary-repro-a ./cmd/raftd ; \
 	sleep 1 ; \
 	$(GO_BUILD) -ldflags "$$ldflags" -o /tmp/apiary-repro-b ./cmd/raftd ; \
@@ -269,7 +248,6 @@ check-reproducible:
 		echo "NOT reproducible: $$a != $$b" ; exit 1 ; \
 	fi
 	@echo "build id was: `BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH} --id`"
-	@echo "version was: `BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' VERSION='$(VERSION)' ${LDFLAGS_SH} --version`"
 
 clean:
 	for S in ${SRCS} ; \
