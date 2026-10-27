@@ -123,9 +123,11 @@ from the embedded `web.FS`.
   console feature is what made it observable at all, which is itself a
   point in favor of building it.
 - No credentials/encryption on the VNC connection itself (`fbuf`'s own
-  RFB server has neither) - acceptable for now since the WebSocket proxy
-  sits behind this project's existing session-based login (ADR-0019),
-  and the underlying TCP connection never leaves loopback.
+  RFB server has neither), and the underlying TCP connection never
+  leaves loopback. **The WebSocket proxy's own leg was NOT left on
+  plain HTTP**: ADR-0189 closed that, and the console is now refused
+  outright unless the frontend is serving TLS and the peer channel is
+  encrypted. See ADR-0189.
 - Console access still only works when `internal/frontend` and the VM's
   owning `managerd` are the same node - see `GetVMConsoleResponse`'s doc
   comment (`api/rpc/manager.proto`) for why, and the same gap already

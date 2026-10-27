@@ -58,7 +58,7 @@ func TestConsoleTunnelLimiter_ReleaseFreesASlotAndCleansUpEmptyEntries(t *testin
 }
 
 func TestConsoleTunnelCaller_UsesSessionUsernameWhenPresent(t *testing.T) {
-	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "ops", pass: "secret"}, map[string]manager.Role{"ops": manager.RoleOperator}, nil, "", "", nil, false)
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "ops", pass: "secret"}, map[string]manager.Role{"ops": manager.RoleOperator}, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestConsoleTunnelCaller_UsesSessionUsernameWhenPresent(t *testing.T) {
 }
 
 func TestConsoleTunnelCaller_FallsBackToRemoteIPWithoutPortWhenNoSession(t *testing.T) {
-	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestServer_ConsoleWS_RefusesBeyondPerCallerCap(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestServer_ConsoleWS_EnforcesReadLimit(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

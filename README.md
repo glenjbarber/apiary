@@ -773,11 +773,18 @@ convention, the branch model, and the release checklist are in
   on beyond whatever a caller sets directly (`MigrateVM`/`MigrateJail`
   now exist, but only as a manual, explicit operator action - see
   ADR-0028)
-- No VNC credentials/encryption on the underlying console connection
-  itself — it relies entirely on the login gate in front of it (see
-  ADR-0020/ADR-0065 above, which already closed the older cross-node
-  console and Networks-page bridge-status gaps this bullet used to
-  describe)
+- The RFB protocol itself carries no credentials and no encryption -
+  that is `fbuf`'s own limitation and Apiary cannot fix it. What
+  Apiary does fix is the leg that could have been on a network: the
+  console crosses the network only over the frontend's own TLS and the
+  peer channel's TLS, and **the console is refused outright when
+  either of those is not in place**, rather than opened in cleartext
+  behind a login gate. The RFB leg itself is loopback-only - bhyve's
+  framebuffer binds `127.0.0.1` and `managerd` always reports the
+  console host as loopback. See
+  [ADR-0189](docs/adr/0189-console-channel-encryption.md), and
+  ADR-0020/ADR-0065 above for the console and cross-node tunnel
+  themselves.
 - Network management: `internal/dhcpd`'s subnet-size limit (previously
   `/24`-or-smaller only) is lifted - any valid IPv4 subnet with at
   least two usable host addresses is now supported, matching

@@ -1,0 +1,17 @@
+libexec/apiary/raftd
+libexec/apiary/managerd
+libexec/apiary/frontend
+libexec/apiary/restshimd
+libexec/apiary/apiaryctl
+libexec/apiary/apiaryinstall
+libexec/apiary/apiary-mcp
+etc/rc.d/apiary_raftd
+etc/rc.d/apiary_managerd
+etc/rc.d/apiary_frontend
+etc/rc.d/apiary_restshimd
+etc/rc.d/apiary_mcp
+@sample etc/apiary/README.md
+@sample etc/apiary/frontend.json.sample
+@sample etc/apiary/managerd.json.sample
+@sample etc/apiary/raftd.json.sample
+@sample etc/apiary/restshimd.json.sample

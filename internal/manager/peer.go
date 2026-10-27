@@ -314,6 +314,17 @@ func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcp
 // only fires when an operator set peer_tls: false explicitly. Calls
 // that carry no credential still dial in plaintext in that same
 // explicit-off state; see the PR for that decision.
+// errInsecureConsoleForward is the refusal for a console tunnel that
+// would cross the network in cleartext.
+//
+// It names the same fix as the credential refusals above - turn peer
+// TLS on, with a trust anchor in place - because it is the same
+// remedy, and an operator who has already been told how to fix the
+// other two should not have to work it out again.
+func errInsecureConsoleForward() error {
+	return fmt.Errorf("refusing to open a VM console tunnel to a peer: peer_tls is false on this node, so the console stream - the guest's screen and keyboard - would cross the network in cleartext. Set peer_tls to true (or remove it, which defaults to true), with a trust anchor in place (see ADR-0093/ADR-0147), before opening a cross-node console")
+}
+
 func errInsecureCredentialForward(credential string) error {
 	return fmt.Errorf("refusing to forward %s to a peer: peer_tls is false on this node, so the connection would be unencrypted. Set peer_tls to true (or remove it, which defaults to true), with a trust anchor in place (see ADR-0093/ADR-0147), before forwarding %s", credential, credential)
 }
@@ -803,6 +814,24 @@ func (t *consoleTunnel) Close() error { return t.conn.Close() }
 // console on addr. The tunnel's first frame is the VM ID; the owner managerd
 // validates ownership and chooses its loopback endpoint itself.
 func (p *PeerReporter) OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error) {
+	// The console tunnel carries a RAW RFB STREAM: the guest's screen
+	// and its keyboard, live. It is not a status read and not a
+	// summary - it is interactive control of the guest.
+	//
+	// So it must not cross the network in cleartext, for the same
+	// reason the peer API key and the restart-guardrail token do not.
+	// The existing guard for those is dialOptsWithKey and
+	// dialRestartGuardrail, which both refuse a plaintext dial
+	// outright; this one was missed, because the console tunnel
+	// attaches no credential and so never went through the check that
+	// would have caught it.
+	//
+	// A guest console in cleartext is not a lesser disclosure than a
+	// credential: it is the guest's screen, its keyboard, and whatever
+	// the operator types into it.
+	if !p.UseTLS {
+		return nil, errInsecureConsoleForward()
+	}
 	conn, client, err := p.dial(addr)
 	if err != nil {
 		return nil, err

@@ -134,6 +134,16 @@ func (s *Server) handleConsolePage(w http.ResponseWriter, r *http.Request) {
 
 	_, consoleErr := s.resolveConsole(r.Context(), id)
 
+	// A console that cannot be opened safely is reported HERE, on the
+	// page the operator is already looking at, rather than as a
+	// WebSocket failure after they have clicked into it. The reason
+	// is the same one the WebSocket refusal gives, and saying it in
+	// one place means the operator is told why before they wait for
+	// a connection that will not succeed.
+	if consoleErr == "" && !s.tlsEnabled {
+		consoleErr = "this Comb's frontend is not serving TLS, so a VM console would cross the network in cleartext - the guest's screen and keyboard would be readable on the wire. Configure tls_cert and tls_key in this Comb's frontend.json and restart the frontend to enable the console."
+	}
+
 	s.render(w, "console_page", s.withAuthFields(r, pageData{
 		ConsoleVMID:   id,
 		ConsoleVMName: vmName,
@@ -152,6 +162,27 @@ func (s *Server) handleConsolePage(w http.ResponseWriter, r *http.Request) {
 // binary WebSocket messages to the TCP connection and vice versa.
 func (s *Server) handleConsoleWS(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
+	// The console stream is the guest's screen and keyboard. Over a
+	// plain HTTP WebSocket it crosses the network in cleartext, so the
+	// session cookie in front of it is not enough: the cookie
+	// authenticates the OPENING of the socket, and everything after
+	// it - every keystroke, every pixel of the guest's screen - would
+	// be readable on the wire.
+	//
+	// So the console is refused outright when this frontend is not
+	// serving TLS. It is a refusal rather than a warning because the
+	// alternative is a console that looks protected and is not, and
+	// the whole point of the login gate in front of it is that an
+	// operator who sees it believes the traffic is private.
+	//
+	// The same reasoning as the peer-side refusal for the cross-node
+	// console: a credential must not cross the network in cleartext,
+	// and neither may the thing that credential was protecting.
+	if !s.tlsEnabled {
+		http.Error(w, "this Comb's frontend is not serving TLS, so a VM console would cross the network in cleartext - the guest's screen and keyboard would be readable on the wire. Configure tls_cert and tls_key in this Comb's frontend.json and restart the frontend to enable the console.", http.StatusForbidden)
+		return
+	}
 
 	caller := consoleTunnelCaller(s, r)
 	if err := s.consoleTunnels.acquire(caller); err != nil {

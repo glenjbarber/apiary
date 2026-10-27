@@ -1231,6 +1231,21 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 	return s
 }
 
+// newTestServerTLS is newTestServer with the frontend serving TLS.
+//
+// The console endpoints refuse to run without it, because a console
+// stream over a plain HTTP WebSocket would cross the network in
+// cleartext - so a console test that wants to exercise the console
+// at all has to be a TLS one.
+func newTestServerTLS(t *testing.T, client *fakeClient) *Server {
+	t.Helper()
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	return s
+}
+
 func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
 	t.Helper()
 	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "", nil, false)
