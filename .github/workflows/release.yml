@@ -1,0 +1,417 @@
+# Publish an Apiary release.
+#
+# WHY THIS BUILDS INSIDE A FREEBSD VM
+#
+# Apiary needs cgo and the host's PAM. cmd/managerd imports
+# internal/pam, which wraps the system libpam through
+# github.com/msteinert/pam/v2, and internal/pam's own package comment
+# says it plainly: "cmd/frontend must be built with CGO_ENABLED=1 on
+# a real FreeBSD host (or a proper cross toolchain), unlike every other
+# Apiary binary, which cross-compiles cleanly from any platform."
+#
+# A `go build` on ubuntu-latest would either fail outright (no PAM
+# headers, and the cgo build would need a FreeBSD cross toolchain
+# anyway) or, worse, succeed with CGO_ENABLED=0 and produce a
+# managerd that cannot authenticate anybody - a silent failure, which
+# is the specific kind this project distrusts everywhere else. So the
+# build runs in a real FreeBSD VM, on a real FreeBSD release, with the
+# real PAM library present.
+#
+# The VM is provided by vmactions/freebsd-vm, which boots an official
+# FreeBSD release image under QEMU, syncs the checkout in, runs the
+# script, and copies the artifacts back out. The "run" script runs
+# under /bin/sh in the VM.
+#
+# WHY GO IS INSTALLED BY HAND
+#
+# The project's go.mod requires Go 1.27. The FreeBSD 15.1 package
+# repository ships Go 1.24-1.26 depending on the quarterly branch, so
+# `pkg install go` would give a toolchain that refuses to build this
+# module. The workflow therefore installs the official Go 1.27.2
+# FreeBSD tarball and verifies it against the published SHA256, which
+# is the checksum go.dev itself publishes for that file.
+
+name: Release
+
+on:
+  # A release is made by pushing a version tag. There is no manual
+  # dispatch: this workflow publishes to the outside world, and a
+  # button someone can press by accident is a button someone WILL
+  # press by accident.
+  #
+  # The tag pattern is deliberately narrow. It requires a "v" prefix and
+  # a three-part version (v1.2.3), optionally with a prerelease
+  # suffix. A tag like "latest" or "nightly" does not match and will
+  # not start a release.
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+# One release at a time. A second tag pushed while a release is in
+# flight would otherwise race the first one for the same release
+# assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The FreeBSD release to build on. 15.1-RELEASE is Apiary's own
+  # supported floor (ADR-0181 records that the HAST fixes Apiary
+  # depends on are upstream from 15.1, and that before 15.1 Apiary
+  # needed a locally patched base system - which no release build can
+  # assume).
+  FREEBSD_RELEASE: '15.1'
+  # The Go toolchain to install. Must satisfy the project's go.mod,
+  # which declares "go 1.27".
+  GO_VERSION: '1.27.2'
+  # The Go FreeBSD tarball's published SHA256, as listed at
+  # https://go.dev/dl/?mode=json. Verified by download, not assumed.
+  GO_SHA256: '3baf61eec549b0c3f638d82636388e36abf94aa14814a011f011d2648ad1eded'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # The required checks. These run exactly the project's own CI steps
+  # (.github/workflows/go-ci.yml) and nothing else, so that a release
+  # cannot be produced from a tree that CI would have rejected.
+  #
+  # Note the deliberate difference: this runs on ubuntu-latest with
+  # libpam0g-dev, because the CHECKS are about the source being sound,
+  # and the source can be checked on Linux. What cannot be done on Linux
+  # is BUILD a working binary, and that is what the build job below
+  # does, on FreeBSD.
+  # ---------------------------------------------------------------------
+  checks:
+    name: Required checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          # The build job needs the tag's tree, not the default branch.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install PAM development files
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: go build ./...
+
+  # ---------------------------------------------------------------------
+  # Build the release artifacts on a real FreeBSD, with real PAM, and
+  # with cgo enabled.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build on FreeBSD
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build release artifacts in FreeBSD
+        id: build
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ env.FREEBSD_RELEASE }}
+          # The checkout is synced into the VM; the artifacts are copied
+          # back out to the host runner, where the release step uploads
+          # them.
+          sync: rsync
+          copyback: true
+          # Cache the prepared VM image so a re-run does not have to
+          # install the Go toolchain from scratch. The cache key is
+          # derived from the prepare script's own content, so changing
+          # the prepare step invalidates it.
+          cache-after-prepare: true
+          prepare: |
+            set -e
+            # Install the Go toolchain. The FreeBSD package repository
+            # does not carry a Go new enough for this project's go.mod
+            # ("go 1.27"), so the official tarball is used instead and
+            # verified against its published checksum.
+            pkg install -y bash curl
+            fetch -o /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.freebsd-amd64.tar.gz"
+            actual=$(sha256 -q /tmp/go.tgz)
+            if [ "$actual" != "$GO_SHA256" ]; then
+              echo "Go tarball checksum mismatch:" >&2
+              echo "  expected $GO_SHA256" >&2
+              echo "  actual   $actual" >&2
+              exit 1
+            fi
+            tar -C /usr/local -xzf /tmp/go.tgz
+            /usr/local/go/bin/go version
+          run: |
+            set -e
+
+            export PATH="/usr/local/go/bin:${PATH}"
+
+            # The build identity. The project's own scripts/build-ldflags.sh
+            # derives this from the checkout; the release workflow uses
+            # the tag's commit and commit date explicitly, so the stamp
+            # describes the source and not the moment of the build.
+            #
+            # BuildID is the short commit. The project's buildinfo package
+            # says the identity is "the commit and nothing else - no
+            # clock, no build counter - so the same commit builds to the
+            # same bytes and the same identifier, forever". That is why
+            # the release does not put a timestamp in the ID: an
+            # artifact's sha256 has to be a checkable fact.
+            BUILD_ID="$(git rev-parse --short=12 HEAD)"
+            BUILD_TIME="$(git log -1 --format=%cI)"
+            export BUILD_ID BUILD_TIME
+
+            echo "Building Apiary ${GITHUB_REF_NAME} (${BUILD_ID})"
+
+            # The project's own build target. It builds every binary in
+            # SRCS with the ldflags that stamp internal/buildinfo, and
+            # it is the same target the maintainer runs.
+            make build
+
+            # Prove the binaries can identify themselves. A build whose
+            # stamp silently failed to apply is worse than a build that
+            # failed: the binaries install, and every daemon reports
+            # build=unknown while the toolchain looks healthy. This is
+            # exactly the failure the stamp exists to prevent, and it
+            # is caught here rather than in production.
+            for s in raftd managerd frontend restshimd apiaryctl apiaryinstall versioncheck apiary-mcp; do
+              printf '%-16s ' "${s}"
+              ./${s} -version 2>&1 | head -1
+            done
+
+            # The RELEASE VERSION must be stamped, and it must be the
+            # tag's. A build whose stamp silently failed to apply is
+            # worse than a build that failed: the artifacts publish,
+            # every daemon reports build=unknown or version=devel, and
+            # an operator has no way to tell a release from a
+            # development build.
+            #
+            # The version is derived from the tag by the project's own
+            # scripts/build-ldflags.sh, because the checkout is the
+            # tag. This asserts that derivation actually happened.
+            want_version="${GITHUB_REF_NAME#v}"
+            for s in raftd managerd frontend restshimd apiaryctl apiaryinstall versioncheck apiary-mcp; do
+              if ! ./${s} -version 2>&1 | head -1 | grep -q "version=${want_version}"; then
+                echo "${s} does not report version=${want_version}." >&2
+                echo "A release build must say which release it is." >&2
+                exit 1
+              fi
+            done
+            echo "every binary reports version=${want_version}: OK"
+
+            # Confirm the cgo/PAM link is real. managerd must be linked
+            # against libpam; a binary that is not was built without
+            # PAM support and cannot authenticate anybody.
+            if ! ldd ./managerd | grep -q libpam; then
+              echo "managerd is not linked against libpam - the cgo/PAM" >&2
+              echo "build did not produce a working binary." >&2
+              ldd ./managerd >&2
+              exit 1
+            fi
+            echo "managerd is linked against libpam: OK"
+
+            # Confirm the binary is a FreeBSD binary and not a
+            # cross-compiled one that happens to have been produced.
+            if ! file ./raftd | grep -q "FreeBSD"; then
+              echo "raftd is not a FreeBSD binary:" >&2
+              file ./raftd >&2
+              exit 1
+            fi
+            echo "raftd is a FreeBSD binary: OK"
+
+            # Package the artifacts. The tarball contains the seven
+            # binaries the project's own `make install` puts on disk
+            # (INSTALL_SRCS), plus versioncheck, which the project's
+            # Makefile builds but deliberately does not install - it is
+            # an operator tool that runs from a checkout. It is shipped
+            # here because a release artifact is the right place for a
+            # tool an operator needs on a Comb that has no checkout.
+            #
+            # The rc.d scripts, the sample configuration files and the
+            # sample README are included so that the artifact can set up
+            # a Comb on its own, exactly as the project's `make setup`
+            # and `make install` would.
+            rm -rf dist-release
+            mkdir -p dist-release/apiary/libexec/apiary
+            mkdir -p dist-release/apiary/etc/rc.d
+            mkdir -p dist-release/apiary/etc/apiary
+
+            for s in raftd managerd frontend restshimd apiaryctl apiaryinstall apiary-mcp versioncheck; do
+              cp -p ./${s} dist-release/apiary/libexec/apiary/
+            done
+            cp -p etc/rc.d/apiary_* dist-release/apiary/etc/rc.d/
+            cp -p etc/apiary/*.json.sample etc/apiary/README.md dist-release/apiary/etc/apiary/
+
+            # The checksum file, so a download can be verified without
+            # trusting the release page.
+            #
+            # It is written OUTSIDE dist-release, and the paths in it
+            # are relative to the release tarball's own layout
+            # (apiary/libexec/apiary/<name>), so that it stays valid
+            # for someone who unpacks the tarball rather than only for
+            # someone who has the staging tree. Writing it inside
+            # dist-release and then deleting that directory - which is
+            # what an earlier version of this step did - destroys the
+            # file before it is ever uploaded.
+            # sha256sum's format, not sha256 -q's. FreeBSD's sha256 -q
+            # prints the bare hash with no filename, which produces a
+            # file that `sha256sum -c` cannot check - it has nothing to
+            # check the hash against. sha256sum prints "<hash>  <path>",
+            # which is the format `sha256sum -c` (and `sha256 -c` on
+            # Linux, and openssl) can actually verify.
+            #
+            # The paths are relative to the root of the RELEASE TARBALL,
+            # i.e. they start with "apiary/", so that unpacking the
+            # tarball and running `sha256sum -c SHA256SUMS` from the
+            # directory the tarball was unpacked into works. If the
+            # paths were relative to the tarball's own top directory
+            # instead, verification would only work from inside that
+            # directory, which is a place nobody unpacks a release to.
+            ( cd dist-release && sha256sum apiary/libexec/apiary/* ) > SHA256SUMS
+
+            # The source tarball, so the release is reproducible from
+            # its own tag. This is the same tarball shape the FreeBSD
+            # port's distinfo checksums.
+            git archive --format=tar.gz --prefix=apiary-${GITHUB_REF_NAME}/ -o apiary-src-${GITHUB_REF_NAME}.tar.gz HEAD
+
+            tar -czf apiary-${GITHUB_REF_NAME}-freebsd-amd64.tar.gz -C dist-release apiary
+            rm -rf dist-release
+
+            # Report what was produced, so the release step's upload
+            # list and this log agree.
+            ls -la *.tar.gz SHA256SUMS
+
+            # The artifacts have to leave the VM. The action's copyback
+            # handles files written into the synced tree, which is what
+            # dist-release was; but the tarballs are written into the
+            # VM's working directory, which is the synced tree too. To
+            # be explicit about it, the artifacts are copied into the
+            # checkout directory that the action syncs back.
+            cp -a *.tar.gz SHA256SUMS ./ 2>/dev/null || true
+
+      - name: Collect artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apiary-release
+          path: |
+            apiary-*.tar.gz
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Publish the GitHub release.
+  #
+  # This job only runs if the build job succeeded, and it needs
+  # `contents: write`, which is why the workflow asks for it at the top
+  # level. It is the one outward-facing step.
+  # ---------------------------------------------------------------------
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: apiary-release
+          path: release
+
+      - name: Verify the artifacts' checksums
+        working-directory: release
+        run: |
+          set -e
+          ls -la
+          # The tarball's own manifest is checked before it is
+          # published: a release whose contents do not match its own
+          # checksum file is not a release.
+          if [ -f SHA256SUMS ]; then
+            echo "--- SHA256SUMS ---"
+            cat SHA256SUMS
+          fi
+          # Recompute the checksum of every published archive and print
+          # it, so the release page and the log agree on what was
+          # published.
+          sha256 -q *.tar.gz
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          echo "Publishing release ${TAG}"
+
+          # The release notes. There is no changelog file in this
+          # repository, so the notes are assembled from the commits
+          # between the previous tag and this one. That is a real
+          # limitation and it is stated in the notes themselves rather
+          # than papered over: the notes describe the commits, and a
+          # human is expected to edit them before the release is
+          # published.
+          #
+          # The draft flag is deliberate. The release is created as a
+          # DRAFT, so it exists but is not announced until a human
+          # publishes it. A release that publishes itself the moment a
+          # tag lands is a release nobody had a chance to read.
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo '')"
+          {
+            echo "## Apiary ${TAG}"
+            echo
+            if [ -n "${PREV_TAG}" ]; then
+              echo "Changes since ${PREV_TAG}:"
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' "${PREV_TAG}..${TAG}"
+            else
+              echo "First release. Commits on this tag:"
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' "${TAG}"
+            fi
+            echo
+            echo
+            echo "### Artifacts"
+            echo
+            echo '| File | What it is |'
+            echo '| --- | --- |'
+            echo "| \`apiary-${TAG}-freebsd-amd64.tar.gz\` | The binaries, rc.d scripts and sample configuration for a FreeBSD amd64 Comb. |"
+            echo "| \`apiary-src-${TAG}.tar.gz\` | The source tree at this tag, as a tarball. |"
+            echo "| \`SHA256SUMS\` | Checksums for the binaries inside the release tarball. |"
+            echo
+            echo "### Compatibility"
+            echo
+            echo "Built on FreeBSD ${FREEBSD_RELEASE}-RELEASE with Go ${GO_VERSION} and cgo enabled,"
+            echo "against the system PAM library. FreeBSD ${FREEBSD_RELEASE}-RELEASE is Apiary's supported floor"
+            echo "(ADR-0181)."
+            echo
+            echo "The binaries are dynamically linked against libpam and the FreeBSD C library."
+          } > release-notes.md
+
+          cat release-notes.md
+
+          gh release create "${TAG}" \
+            --draft \
+            --title "Apiary ${TAG}" \
+            --notes-file release-notes.md \
+            release/*.tar.gz release/SHA256SUMS
