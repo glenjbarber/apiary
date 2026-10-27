@@ -106,13 +106,12 @@ every one of these holds:
    semantics - stages 1, 2 and 3 are merged at the time of writing
    (ADR-0157, ADR-0182, ADR-0188).
 
-3. **The compatibility floor is decided.** The decision between FreeBSD
-   14 and FreeBSD 15 as the floor is *open*, and the checklist says so.
-   The floor cannot be decided in the abstract: it is decided by a
-   working, tested Apiary on that FreeBSD release. ADR-0181 already
-   records that the `hastd`/`hastctl` fixes Apiary needed are upstream
-   in FreeBSD 15.1-RELEASE, and that 15.1-RELEASE is the supported
-   floor.
+3. **The compatibility floor is decided.** **DECIDED: the floor is
+   FreeBSD 15.1-RELEASE.** The floor cannot be decided in the abstract:
+   it is decided by a working, tested Apiary on that FreeBSD release.
+   ADR-0181 already records that the `hastd`/`hastctl` fixes Apiary
+   needed are upstream in FreeBSD 15.1-RELEASE, and the owner has now
+   fixed the floor there.
 
 4. **The release branch model has run at least once.** A `release/`
    branch and a `stable/` branch exist, a release has been cut from
@@ -135,12 +134,12 @@ are in force.
 
 | Apiary version | Module path | Compatibility line | Lowest supported FreeBSD | Status |
 | --- | --- | --- | --- | --- |
-| `1.0.0-alpha` | `github.com/glenjbarber/apiary` | none - pre-compatibility | not yet fixed | **In force.** The initial public release. |
-| `1.0.0-alpha.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | not yet fixed | Reserved for later alphas of the same pre-release line. |
-| `1.0.0-beta.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | not yet fixed | Reserved. |
-| `1.0.0-rc.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | not yet fixed | Reserved. |
-| `1.0.0` | `github.com/glenjbarber/apiary` | 1.x (pre-compatibility) | not yet fixed | Reserved. The last release before the scheme changes. |
-| `15.0.0` | `github.com/glenjbarber/apiary/v15` | 15.x | FreeBSD 15 | **Reserved.** Not yet established; the floor decision is open. |
+| `1.0.0-alpha` | `github.com/glenjbarber/apiary` | none - pre-compatibility | FreeBSD 15.1-RELEASE | **In force.** The initial public release. |
+| `1.0.0-alpha.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | FreeBSD 15.1-RELEASE | Reserved for later alphas of the same pre-release line. |
+| `1.0.0-beta.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | FreeBSD 15.1-RELEASE | Reserved. |
+| `1.0.0-rc.N` | `github.com/glenjbarber/apiary` | none - pre-compatibility | FreeBSD 15.1-RELEASE | Reserved. |
+| `1.0.0` | `github.com/glenjbarber/apiary` | 1.x (pre-compatibility) | FreeBSD 15.1-RELEASE | Reserved. The last release before the scheme changes. |
+| `15.0.0` | `github.com/glenjbarber/apiary/v15` | 15.x | FreeBSD 15.1-RELEASE | **Reserved.** Not yet established; the alpha's freeze period comes first. |
 | `16.0.0` | `github.com/glenjbarber/apiary/v16` | 16.x | FreeBSD 16 | Reserved. Only if the floor moves. |
 
 The FreeBSD major version in the "lowest supported" column is the
@@ -824,7 +823,8 @@ checked. All of it was run with Go 1.27.2 on FreeBSD/amd64.
 
 ### What could not be verified
 
-- **The FreeBSD 14 vs 15 floor.** The decision is open, by the
+- **The FreeBSD 14 vs 15 floor.** RESOLVED: the floor is FreeBSD
+  15.1-RELEASE. (The decision was open, by the
   checklist's own statement. This document does not make it.
 - **The `release/` and `stable/` branch model in practice.** It is
   specified here but has never been exercised - the alpha is the first

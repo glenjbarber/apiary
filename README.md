@@ -1162,6 +1162,12 @@ Ephemeral state is what raft actually replicates across the cluster.
 
 ## Building and testing
 
+**Apiary requires FreeBSD 15.1-RELEASE or later.** That is the
+compatibility floor: it is the release in which the `hastd`/`hastctl`
+fixes Apiary depends on became upstream, so a stock install needs no
+locally patched build of either
+([ADR-0181](docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md)).
+
 Standard Go tooling: `go build ./...`, `go vet ./...`, `go test ./...`.
 Packages that shell out to FreeBSD-only tools (`internal/zfs`,
 `internal/jail`, `internal/hast`, `internal/bhyve`) skip their
