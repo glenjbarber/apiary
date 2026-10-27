@@ -57,7 +57,7 @@ no privileges to do that, and the plan names every field it would
 leave alone and why:
 
 ```bash
-/usr/local/libexec/apiary/apiaryctl install
+/usr/local/sbin/apiaryctl install
 ```
 
 A run that refuses anything still does everything else, and exits
