@@ -600,6 +600,7 @@ func TestNoLiveSecretAppearsAnywhereInAGeneration(t *testing.T) {
 		{"raftdconfig.DataDir", raftdValues["DataDir"]},
 		{"raftdconfig.RaftTLSKey path", raftdValues["RaftTLSKey"]},
 		{"frontendconfig.ManagerAddr", frontValues["ManagerAddr"]},
+		{"frontendconfig.APIProxyEnabled", "true"},
 		{"frontendconfig.TLSKey path", frontValues["TLSKey"]},
 		{"origincert.KeyPath", certs[0].KeyPath},
 		{"origincert.CertPath", certs[0].CertPath},

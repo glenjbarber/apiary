@@ -32,11 +32,11 @@ Glen reports that all of the hastd-related changes Apiary needed are now in Free
 
 ## Decision
 
-1. On FreeBSD 15.1-RELEASE and later, Apiary needs no locally built or patched hastd or hastctl.
-2. Apiary documents FreeBSD 15.1-RELEASE or later as the baseline for HAST-replicated disks.
+1. On FreeBSD 15.1-RELEASE and later, Apiary needs no locally built or patched hastd or hastctl. The upstream fix is in every supported FreeBSD release.
+2. Apiary documents FreeBSD 15.1-RELEASE or later as its supported floor, and as the baseline for HAST-replicated disks.
 3. Apiary still never builds or applies FreeBSD source patches.
-   The decision in ADR-0082 that this is operator-owned stays, but it no longer describes a required step on the baseline release.
-4. The patch instructions in ADR-0008 and ADR-0022 are retained as history for releases before 15.1.
+   The decision in ADR-0082 that this is operator-owned stays, but it no longer describes a required step on any supported release.
+4. The patch instructions in ADR-0008 and ADR-0022 are retained as history for releases that predate the upstream fix.
 
 ## Consequences
 
@@ -47,15 +47,12 @@ Documentation to update, none of it done by this ADR:
 - ADR-0026, which says the nodes run a patched hastd.
 - Back-references in ADR-0008, ADR-0022 and ADR-0082, using the existing "Superseded in part by" convention (see ADR-0047).
 
-Code follow-up, for Claude Code:
+Code follow-up, done 2026-10-19:
 
-- `internal/install/checks.go` near line 975 gives a FixHint that tells the operator to apply the bug 298085 patch before relying on hastd.
-- `cmd/apiaryinstall/main.go` near line 47 describes the patch in the `-enable-hast` help text.
-- The preflight should instead check the installed release, report ok on 15.1 or later, and report manual with an upgrade hint on earlier releases.
-  It should stay report-only.
+- `internal/install/checks.go` reports ok on FreeBSD 15.1-RELEASE and later, and manual with an upgrade hint on earlier releases. It stays report-only.
+- `cmd/apiaryinstall/main.go` help text, `docs/bootstrap.md`, and the README preflight paragraph describe the same floor.
 
-Machines running a release before 15.1 with a patched hastd keep working.
-They are no longer a documented HAST baseline.
+Machines running a release with a patched hastd keep working.
 
 ## Open items
 

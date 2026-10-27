@@ -69,6 +69,7 @@ func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
 		ManagerTLSServerName: "apiverse.apiary.work",
 		TLSCert:              "/usr/local/etc/apiary/tls/fullchain.pem",
 		TLSKey:               "/usr/local/etc/apiary/tls/key.pem",
+		APIProxyEnabled:      true,
 		PeerTLS:              boolPtr(true),
 		PeerTLSCA:            "/usr/local/etc/apiary/tls/peer-ca.pem",
 		PeerHostnameSuffix:   ".apiary.work",
@@ -86,6 +87,7 @@ func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
 	if got.ManagerAddr != want.ManagerAddr || got.HTTPAddr != want.HTTPAddr || got.ManagerTLS != want.ManagerTLS ||
 		got.ManagerTLSCA != want.ManagerTLSCA || got.ManagerTLSServerName != want.ManagerTLSServerName ||
 		got.TLSCert != want.TLSCert || got.TLSKey != want.TLSKey ||
+		got.APIProxyEnabled != want.APIProxyEnabled ||
 		got.PeerTLS == nil || *got.PeerTLS != *want.PeerTLS ||
 		got.PeerTLSCA != want.PeerTLSCA || got.PeerHostnameSuffix != want.PeerHostnameSuffix ||
 		got.PeerManagerPort != want.PeerManagerPort || got.ManagerAPIKey != want.ManagerAPIKey {

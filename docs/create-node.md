@@ -316,17 +316,19 @@ deliberate:
   unchanged (ADR-0024), so its entire security boundary is managerd's
   per-key auth (ADR-0023).
 
-Remote callers use an SSH local forward rather than a LAN bind:
+Remote callers can use an SSH local forward:
 
 ```bash
 ssh -L 8081:127.0.0.1:8081 brood.lab3.home.arpa
 ```
 
-Only consider LAN exposure for `8081` once managerd API keys are
-actually configured. Until then the `Authorization` header is decorative
-and the port is an unauthenticated control surface. `frontend` on `8080`
-is the opposite case: that one is meant to be LAN-exposed, because it is
-the UI a human uses.
+Keep `8081` loopback-only. For automated remote clients, frontend can
+optionally proxy the allow-listed `/api/v1/` routes when
+`api_proxy_enabled` is true in `frontend.json` (ADR-0154). That path
+requires frontend TLS and configured managerd API-key authentication;
+callers still provide their own bearer key. `frontend` on `8080` is the
+browser-facing listener, and remains usable for the web UI independently
+of whether the proxy is enabled.
 
 ```bash
 service apiary_frontend start
