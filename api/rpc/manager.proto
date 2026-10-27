@@ -942,6 +942,27 @@ service ManagerService {
   rpc ListCertificateReservations(ListCertificateReservationsRequest) returns (ListCertificateReservationsResponse);
   rpc DropCertificateReservation(DropCertificateReservationRequest) returns (DropCertificateReservationResponse);
 
+  // IssueColonyRaftLeaf asks the Comb that HOLDS the Colony CA key to
+  // issue a raft transport leaf for a joining Comb (ADR-0187).
+  //
+  // It is a SEPARATE call, and it is separate because the CA key does
+  // not move. Only the Comb that ran `apiaryctl colony-ca init` holds
+  // that key, and it is not necessarily the Colony's leader - on a
+  // live Colony the leader and the CA holder are different Combs. So
+  // the leaf cannot be issued by whoever happens to be building the
+  // join credential bundle; the leader asks the CA holder, and the
+  // CA holder issues.
+  //
+  // The CA KEY never leaves the CA holder. What leaves it is a LEAF
+  // and its key, sealed to the joining Comb's own certificate, which
+  // is the same shape as ADR-0171's prepared-certificate delivery.
+  //
+  // The call is NOT unauthenticated. It is issued by a member of the
+  // Colony forwarding to another member, over the ordinary peer
+  // channel, so the CA holder is talking to a known Colony member and
+  // not to whoever dialled it.
+  rpc IssueColonyRaftLeaf(IssueColonyRaftLeafRequest) returns (IssueColonyRaftLeafResponse);
+
   // IssuePreparedCertificate issues a certificate for a Comb that has
   // NOT joined yet, and records it as a reservation the join flow will
   // deliver.
@@ -4182,6 +4203,58 @@ message PendingJoinRequest {
   // means "the joiner made no claim" rather than "the joiner claimed
   // epoch 0".
   uint64 colony_epoch = 23;
+}
+
+// IssueColonyRaftLeafRequest asks the CA holder to issue a raft
+// transport leaf for a joining Comb (ADR-0187).
+message IssueColonyRaftLeafRequest {
+  // node_id is the JOINING Comb's raft identity. It is also the leaf's
+  // DNS name, because that is the name peers dial it by.
+  string node_id = 1;
+
+  // raft_bind_address is the address the Colony's leader will dial
+  // this Comb on once it is a voter. It contributes an IP SAN to the
+  // leaf, so the leaf covers the address the Colony actually uses.
+  string raft_bind_address = 2;
+
+  // recipient_tls_certificate_pem is the JOINING Comb's own serving
+  // certificate - the one it presented during the join. The leaf and
+  // its key are sealed to it, so only that Comb can read them.
+  //
+  // The seal needs the recipient's CERTIFICATE. The recipient's
+  // private key never leaves the joiner.
+  string recipient_tls_certificate_pem = 3;
+
+  // request_id is the join request this leaf is for. It is bound into
+  // the envelope's associated data, so a ciphertext copied from one
+  // join's delivery fails to decrypt under another's.
+  string request_id = 4;
+
+  // expected_ca_fingerprint is the Colony CA fingerprint, in
+  // internal/colonyca's own format (the lowercase hex SHA-256 of the
+  // CA certificate's DER bytes).
+  //
+  // The CA holder re-derives its OWN CA's fingerprint and refuses if
+  // it does not match. That is what stops a forwarded request from
+  // asking a Comb to issue a leaf from a DIFFERENT CA than the one
+  // the Colony pinned.
+  string expected_ca_fingerprint = 5;
+}
+
+// IssueColonyRaftLeafResponse carries the sealed leaf.
+message IssueColonyRaftLeafResponse {
+  // sealed_leaf is the leaf certificate and its private key, sealed to
+  // the joining Comb's own certificate. It is opaque to everyone else,
+  // including the Comb that asked for it.
+  string sealed_leaf = 1;
+
+  // ca_fingerprint is the CA's fingerprint, so the caller can record
+  // which CA issued the leaf.
+  string ca_fingerprint = 2;
+
+  // error is set instead of a leaf when the issuance was refused. The
+  // refusal names its cause.
+  string error = 3;
 }
 
 message RequestJoinColonyRequest {

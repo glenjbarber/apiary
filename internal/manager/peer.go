@@ -1091,6 +1091,25 @@ func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req 
 	return client.ApproveJoinRequest(ctx, req)
 }
 
+// IssueColonyRaftLeaf forwards a leaf-issuance request to the member
+// that holds the Colony CA key (ADR-0187).
+//
+// It is an AUTHENTICATED forward, over the ordinary peer channel,
+// because the call makes a Comb sign a certificate. The join RPCs
+// are deliberately unauthenticated and fail-closed; this one is
+// neither, and the difference is the point.
+//
+// The address is the CA HOLDER's, derived from cluster state or from
+// the join authorization - never from a caller-supplied one.
+func (p *PeerReporter) IssueColonyRaftLeaf(ctx context.Context, addr string, req *rpcpb.IssueColonyRaftLeafRequest) (*rpcpb.IssueColonyRaftLeafResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.IssueColonyRaftLeaf(ctx, req)
+}
+
 // UpdateVoterAddress forwards on a leader-hint rejection, mirroring
 // ApproveJoinRequest above exactly (ADR-0106).
 func (p *PeerReporter) UpdateVoterAddress(ctx context.Context, addr string, req *rpcpb.UpdateVoterAddressRequest) (*rpcpb.UpdateVoterAddressResponse, error) {

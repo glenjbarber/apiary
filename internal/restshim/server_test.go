@@ -778,6 +778,10 @@ func (f *fakeClient) IssuePreparedCertificate(context.Context, *rpcpb.IssuePrepa
 	return &rpcpb.IssuePreparedCertificateResponse{}, nil
 }
 
+func (f *fakeClient) IssueColonyRaftLeaf(context.Context, *rpcpb.IssueColonyRaftLeafRequest, ...grpc.CallOption) (*rpcpb.IssueColonyRaftLeafResponse, error) {
+	return &rpcpb.IssueColonyRaftLeafResponse{}, nil
+}
+
 // ListTrustedPeers - the peer trust store's read side (ADR-0177).
 func (f *fakeClient) ListTrustedPeers(context.Context, *rpcpb.ListTrustedPeersRequest, ...grpc.CallOption) (*rpcpb.ListTrustedPeersResponse, error) {
 	return &rpcpb.ListTrustedPeersResponse{}, nil

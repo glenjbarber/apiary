@@ -927,6 +927,10 @@ func (f *fakeClient) IssuePreparedCertificate(context.Context, *rpcpb.IssuePrepa
 	return &rpcpb.IssuePreparedCertificateResponse{}, nil
 }
 
+func (f *fakeClient) IssueColonyRaftLeaf(context.Context, *rpcpb.IssueColonyRaftLeafRequest, ...grpc.CallOption) (*rpcpb.IssueColonyRaftLeafResponse, error) {
+	return &rpcpb.IssueColonyRaftLeafResponse{}, nil
+}
+
 func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
 	f.lastGetWindowReq = in
 	if f.getWindowErr != nil {

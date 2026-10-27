@@ -135,6 +135,7 @@ const (
 	ManagerService_PrepareCertificateReservation_FullMethodName       = "/apiary.rpc.v1.ManagerService/PrepareCertificateReservation"
 	ManagerService_ListCertificateReservations_FullMethodName         = "/apiary.rpc.v1.ManagerService/ListCertificateReservations"
 	ManagerService_DropCertificateReservation_FullMethodName          = "/apiary.rpc.v1.ManagerService/DropCertificateReservation"
+	ManagerService_IssueColonyRaftLeaf_FullMethodName                 = "/apiary.rpc.v1.ManagerService/IssueColonyRaftLeaf"
 	ManagerService_IssuePreparedCertificate_FullMethodName            = "/apiary.rpc.v1.ManagerService/IssuePreparedCertificate"
 	ManagerService_PreflightApproveJoinRequest_FullMethodName         = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
@@ -1025,6 +1026,26 @@ type ManagerServiceClient interface {
 	PrepareCertificateReservation(ctx context.Context, in *PrepareCertificateReservationRequest, opts ...grpc.CallOption) (*PrepareCertificateReservationResponse, error)
 	ListCertificateReservations(ctx context.Context, in *ListCertificateReservationsRequest, opts ...grpc.CallOption) (*ListCertificateReservationsResponse, error)
 	DropCertificateReservation(ctx context.Context, in *DropCertificateReservationRequest, opts ...grpc.CallOption) (*DropCertificateReservationResponse, error)
+	// IssueColonyRaftLeaf asks the Comb that HOLDS the Colony CA key to
+	// issue a raft transport leaf for a joining Comb (ADR-0187).
+	//
+	// It is a SEPARATE call, and it is separate because the CA key does
+	// not move. Only the Comb that ran `apiaryctl colony-ca init` holds
+	// that key, and it is not necessarily the Colony's leader - on a
+	// live Colony the leader and the CA holder are different Combs. So
+	// the leaf cannot be issued by whoever happens to be building the
+	// join credential bundle; the leader asks the CA holder, and the
+	// CA holder issues.
+	//
+	// The CA KEY never leaves the CA holder. What leaves it is a LEAF
+	// and its key, sealed to the joining Comb's own certificate, which
+	// is the same shape as ADR-0171's prepared-certificate delivery.
+	//
+	// The call is NOT unauthenticated. It is issued by a member of the
+	// Colony forwarding to another member, over the ordinary peer
+	// channel, so the CA holder is talking to a known Colony member and
+	// not to whoever dialled it.
+	IssueColonyRaftLeaf(ctx context.Context, in *IssueColonyRaftLeafRequest, opts ...grpc.CallOption) (*IssueColonyRaftLeafResponse, error)
 	// IssuePreparedCertificate issues a certificate for a Comb that has
 	// NOT joined yet, and records it as a reservation the join flow will
 	// deliver.
@@ -2354,6 +2375,16 @@ func (c *managerServiceClient) DropCertificateReservation(ctx context.Context, i
 	return out, nil
 }
 
+func (c *managerServiceClient) IssueColonyRaftLeaf(ctx context.Context, in *IssueColonyRaftLeafRequest, opts ...grpc.CallOption) (*IssueColonyRaftLeafResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueColonyRaftLeafResponse)
+	err := c.cc.Invoke(ctx, ManagerService_IssueColonyRaftLeaf_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) IssuePreparedCertificate(ctx context.Context, in *IssuePreparedCertificateRequest, opts ...grpc.CallOption) (*IssuePreparedCertificateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(IssuePreparedCertificateResponse)
@@ -3350,6 +3381,26 @@ type ManagerServiceServer interface {
 	PrepareCertificateReservation(context.Context, *PrepareCertificateReservationRequest) (*PrepareCertificateReservationResponse, error)
 	ListCertificateReservations(context.Context, *ListCertificateReservationsRequest) (*ListCertificateReservationsResponse, error)
 	DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error)
+	// IssueColonyRaftLeaf asks the Comb that HOLDS the Colony CA key to
+	// issue a raft transport leaf for a joining Comb (ADR-0187).
+	//
+	// It is a SEPARATE call, and it is separate because the CA key does
+	// not move. Only the Comb that ran `apiaryctl colony-ca init` holds
+	// that key, and it is not necessarily the Colony's leader - on a
+	// live Colony the leader and the CA holder are different Combs. So
+	// the leaf cannot be issued by whoever happens to be building the
+	// join credential bundle; the leader asks the CA holder, and the
+	// CA holder issues.
+	//
+	// The CA KEY never leaves the CA holder. What leaves it is a LEAF
+	// and its key, sealed to the joining Comb's own certificate, which
+	// is the same shape as ADR-0171's prepared-certificate delivery.
+	//
+	// The call is NOT unauthenticated. It is issued by a member of the
+	// Colony forwarding to another member, over the ordinary peer
+	// channel, so the CA holder is talking to a known Colony member and
+	// not to whoever dialled it.
+	IssueColonyRaftLeaf(context.Context, *IssueColonyRaftLeafRequest) (*IssueColonyRaftLeafResponse, error)
 	// IssuePreparedCertificate issues a certificate for a Comb that has
 	// NOT joined yet, and records it as a reservation the join flow will
 	// deliver.
@@ -3854,6 +3905,9 @@ func (UnimplementedManagerServiceServer) ListCertificateReservations(context.Con
 }
 func (UnimplementedManagerServiceServer) DropCertificateReservation(context.Context, *DropCertificateReservationRequest) (*DropCertificateReservationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DropCertificateReservation not implemented")
+}
+func (UnimplementedManagerServiceServer) IssueColonyRaftLeaf(context.Context, *IssueColonyRaftLeafRequest) (*IssueColonyRaftLeafResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssueColonyRaftLeaf not implemented")
 }
 func (UnimplementedManagerServiceServer) IssuePreparedCertificate(context.Context, *IssuePreparedCertificateRequest) (*IssuePreparedCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssuePreparedCertificate not implemented")
@@ -5956,6 +6010,24 @@ func _ManagerService_DropCertificateReservation_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_IssueColonyRaftLeaf_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueColonyRaftLeafRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).IssueColonyRaftLeaf(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_IssueColonyRaftLeaf_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).IssueColonyRaftLeaf(ctx, req.(*IssueColonyRaftLeafRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_IssuePreparedCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(IssuePreparedCertificateRequest)
 	if err := dec(in); err != nil {
@@ -6626,6 +6698,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropCertificateReservation",
 			Handler:    _ManagerService_DropCertificateReservation_Handler,
+		},
+		{
+			MethodName: "IssueColonyRaftLeaf",
+			Handler:    _ManagerService_IssueColonyRaftLeaf_Handler,
 		},
 		{
 			MethodName: "IssuePreparedCertificate",

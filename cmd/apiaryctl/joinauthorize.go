@@ -42,6 +42,7 @@ func runJoinAuthorize(args []string) int {
 		nodeID         string
 		fingerprint    string
 		colonyCA       string
+		colonyCAHolder string
 		requestID      string
 		authorizations string
 		raftdConfig    string
@@ -50,6 +51,7 @@ func runJoinAuthorize(args []string) int {
 	fs.StringVar(&nodeID, "node-id", "", "the joining Comb's raft identity, exactly as its own Machine page shows it (required)")
 	fs.StringVar(&fingerprint, "fingerprint", "", "that Comb's managerd TLS certificate fingerprint, exactly as its own Machine page shows it (required)")
 	fs.StringVar(&colonyCA, "colony-ca-fingerprint", "", "the Colony CA's fingerprint, in colonyca's own format: the lowercase hex SHA-256 of the CA certificate's DER bytes, with no prefix and no separators. Pin it when this Colony uses raft transport TLS - the joining Comb checks the CA it is given against this value, and a CA that does not match stops the join")
+	fs.StringVar(&colonyCAHolder, "colony-ca-holder", "", "the raft identity of the member that HOLDS the Colony CA key - the Comb that ran `apiaryctl colony-ca init`. Give it when this Colony uses raft transport TLS and the joining Comb is to be given a leaf issued from that CA. It is needed because the CA key does not move: only that member can issue a leaf, and it is not necessarily the Colony's leader")
 	fs.StringVar(&requestID, "request-id", "", "narrow the match to one pending request, when the same Comb has more than one outstanding")
 	fs.StringVar(&authorizations, "authorizations", "", "path to the authorization store; defaults to "+joinauth.DefaultPath)
 	fs.StringVar(&raftdConfig, "raftd-config", "", "path to raftd.json, to find the local raftd socket; defaults to "+raftdconfig.DefaultPath)
@@ -120,13 +122,14 @@ is running and that raftd.json names the right socket.
 	}
 
 	if _, err := joinauth.Authorize(joinauth.AuthorizeOptions{
-		Path:                authorizations,
-		NodeID:              nodeID,
-		Fingerprint:         fingerprint,
-		ColonyCAFingerprint: colonyCA,
-		RequestID:           requestID,
-		TTL:                 expiresIn,
-		Out:                 os.Stdout,
+		Path:                 authorizations,
+		NodeID:               nodeID,
+		Fingerprint:          fingerprint,
+		ColonyCAFingerprint:  colonyCA,
+		ColonyCAHolderNodeID: colonyCAHolder,
+		RequestID:            requestID,
+		TTL:                  expiresIn,
+		Out:                  os.Stdout,
 	}, pending); err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-authorize: %v\n", err)
 		return 1

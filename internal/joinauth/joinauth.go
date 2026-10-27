@@ -128,6 +128,27 @@ type Entry struct {
 	// in the authorization is what makes the CA the joining Comb
 	// receives a pinned one rather than merely a supplied one.
 	ColonyCAFingerprint string `json:"colony_ca_fingerprint,omitempty"`
+
+	// ColonyCAHolderNodeID is the raft identity of the member that
+	// HOLDS the Colony CA key - the one Comb that ran
+	// `apiaryctl colony-ca init` and can therefore issue a raft
+	// transport leaf.
+	//
+	// It is OPTIONAL, and empty means "this entry does not say which
+	// member holds the CA".
+	//
+	// WHY IT IS NEEDED: the CA key does not move. Only the Comb that
+	// holds it can issue a leaf, and on a live Colony that Comb is not
+	// necessarily the leader - the leader is the Comb that happens to
+	// build the join credential bundle. So the leader has to know
+	// which member to ask, and the only party that knows is the
+	// operator, who is already running this command and who already
+	// knows where the Colony's CA key lives.
+	//
+	// An empty holder is not an error. It means this entry does not
+	// authorize a leaf to be issued, which is right for a Colony
+	// whose members do not use raft transport TLS.
+	ColonyCAHolderNodeID string `json:"colony_ca_holder_node_id,omitempty"`
 }
 
 // Store is the whole file. A named field rather than a bare array so

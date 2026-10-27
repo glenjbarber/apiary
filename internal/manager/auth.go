@@ -405,6 +405,20 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/DropCertificateReservation":  RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/ListCertificateReservations": RoleViewer,
 
+	// IssueColonyRaftLeaf (ADR-0187) asks this Comb to issue a raft
+	// transport leaf for a joining Comb, from the Colony CA whose key
+	// this Comb holds. It is Admin because it ISSUES A CREDENTIAL -
+	// a certificate the whole Colony will accept - which is the same
+	// reason IssuePreparedCertificate above is Admin.
+	//
+	// It is deliberately NOT exempt. The join RPCs are exempt because
+	// they have to be answerable by a Comb that has no API key yet;
+	// this one is not, because it is called by a member of the Colony
+	// forwarding to another member, and a call that can make a Comb
+	// sign a certificate has no business being answerable by whoever
+	// dialled it.
+	"/apiary.rpc.v1.ManagerService/IssueColonyRaftLeaf": RoleAdmin,
+
 	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
 	// live dial to a caller-influenced address (only a local raft-
 	// internal state read) - Viewer-tier, matching

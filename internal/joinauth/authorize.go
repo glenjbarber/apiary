@@ -76,6 +76,15 @@ type AuthorizeOptions struct {
 	// it is joining.
 	ColonyCAFingerprint string
 
+	// ColonyCAHolderNodeID is the raft identity of the member that
+	// holds the Colony CA key.
+	//
+	// It is OPTIONAL. It is needed only when the joining Comb is to
+	// be given a raft transport leaf issued from the Colony CA, and
+	// only when that member is not the leader - which is the usual
+	// case, because the CA key does not move.
+	ColonyCAHolderNodeID string
+
 	// Now defaults to time.Now. A parameter so an expiry can be tested
 	// without waiting a day, and so this package never reads a clock
 	// behind a caller's back - the same rule the FSM follows for the
@@ -187,11 +196,12 @@ func Authorize(opts AuthorizeOptions, pending []PendingRequest) (AuthorizeResult
 		return AuthorizeResult{}, fmt.Errorf("joinauth: generating an entry id: %w", err)
 	}
 	entry := Entry{
-		ID:                  id,
-		NodeID:              opts.NodeID,
-		Fingerprint:         opts.Fingerprint,
-		ExpiresAtUnix:       now().Add(ttl).Unix(),
-		ColonyCAFingerprint: NormalizeCAFingerprint(opts.ColonyCAFingerprint),
+		ID:                   id,
+		NodeID:               opts.NodeID,
+		Fingerprint:          opts.Fingerprint,
+		ExpiresAtUnix:        now().Add(ttl).Unix(),
+		ColonyCAFingerprint:  NormalizeCAFingerprint(opts.ColonyCAFingerprint),
+		ColonyCAHolderNodeID: strings.TrimSpace(opts.ColonyCAHolderNodeID),
 	}
 	store.Authorizations = append(store.Authorizations, entry)
 	if err := store.Save(path); err != nil {
