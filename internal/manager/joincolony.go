@@ -517,6 +517,15 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 			// recording a request that says nothing about which Colony
 			// the joiner meant.
 			ColonyId: req.GetColonyId(),
+			// ADR-0156 Stage 2: the JOINER's epoch claim travels with
+			// the forward too, and is compared by the member that
+			// actually records the request, against its own
+			// replicated epoch, in the FSM's apply function. It is
+			// the joiner's CLAIM about the Colony's generation, so
+			// it is the joiner's value and is never filled in from
+			// this node's own state - the same rule the Colony ID
+			// above follows.
+			ColonyEpoch: req.GetColonyEpoch(),
 		})
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
@@ -614,6 +623,14 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 					// the audit trail shows which Colony the joiner
 					// said it was joining.
 					ColonyId: req.GetColonyId(),
+					// ADR-0156 Stage 2: the joining node's claimed
+					// Colony GENERATION, recorded on the replicated
+					// request for the same reason. Zero means the
+					// joiner made no claim - which is deliberately
+					// NOT the same as a claim of epoch 0, and the
+					// audit trail distinguishes "claimed epoch 1"
+					// from "claimed nothing".
+					ColonyEpoch: req.GetColonyEpoch(),
 					// ADR-0147 Part 4: the window's epoch, recorded at
 					// creation so a later reopen cannot finish this
 					// request. The live-window check above guarantees
@@ -649,6 +666,18 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 // target_address means the request itself lives on a REMOTE Colony
 // member, not here.
 func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	// ADR-0156 Stage 2: refuse a caller that is behind this Colony's
+	// GENERATION. This is a READ, but it is a read of a JOIN RECORD,
+	// and a peer that is behind has no business reading this Colony's
+	// join state any more than it has business acting on it.
+	//
+	// It is checked BEFORE the target_address forward below, because
+	// a stale peer must be refused by the node it actually reached
+	// rather than being allowed to relay itself onward - the whole
+	// point of the check is that a stale peer stops here.
+	if err := s.checkPeerEpoch(ctx, req.GetColonyEpoch()); err != nil {
+		return &rpcpb.GetJoinRequestStatusResponse{Error: err.Error()}, nil
+	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
@@ -780,6 +809,10 @@ type joinStatusRequestForwarder interface {
 }
 
 func (s *Server) forwardJoinRequestStatus(ctx context.Context, address string, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	// ADR-0156 Stage 2: this node's own epoch travels with the
+	// forward, so the member that actually holds the request can
+	// refuse a stale-epoch caller rather than acting on it.
+	s.stampPeerEpochStatus(ctx, req)
 	if forwarder, ok := s.peers.(joinStatusRequestForwarder); ok {
 		return forwarder.GetJoinRequestStatusUnauthenticatedWithRequest(ctx, address, req)
 	}
@@ -846,6 +879,25 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
 			"confirm_phrase %q does not match the required confirmation phrase %q - nothing was done",
 			req.GetConfirmPhrase(), approveJoinRequestConfirmPhrase)}, nil
+	}
+
+	// ADR-0156 Stage 2: refuse a caller that is behind this Colony's
+	// GENERATION.
+	//
+	// This is the RPC-side refusal of a stale-epoch node. It sits
+	// AFTER the confirm_phrase check on purpose, for the same reason
+	// that check is first: a wrong or missing phrase must cause no
+	// action at all, and an epoch check in front of it would mean a
+	// mistyped phrase produced a different error than the one the
+	// operator needs to see.
+	//
+	// The refusal lives here and not in the FSM because this call is
+	// not a replicated state change on its own - the approval it
+	// leads to is, but the epoch comparison is about a message
+	// arriving from OUTSIDE the log, which never becomes replicated
+	// state. There is no log entry for the FSM to refuse.
+	if err := s.checkPeerEpoch(ctx, req.GetColonyEpoch()); err != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: err.Error()}, nil
 	}
 
 	// ADR-0147 Part 4: the live-window check comes FIRST, before the
@@ -918,6 +970,10 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		hint := currentLeaderRaftAddress(status)
 		switch {
 		case hint != "" && s.peers != nil:
+			// ADR-0156 Stage 2: state this node's own epoch on the
+			// forward, so the leader can compare it against its own
+			// replicated epoch and refuse a stale-epoch peer.
+			s.stampPeerEpoch(ctx, req)
 			var fwd *rpcpb.ApproveJoinRequestResponse
 			if fwd, forwardErr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); forwardErr == nil {
 				return fwd, nil
@@ -1073,6 +1129,7 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		if s.peers == nil {
 			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("peer-key provisioning reached a follower; the leader is at %s but peer forwarding is not configured", leaderAddress), LeaderHint: leaderAddress}, nil
 		}
+		s.stampPeerEpoch(ctx, req)
 		forwarded, forwardErr := s.peers.ApproveJoinRequest(ctx, leaderAddress, req)
 		if forwardErr != nil {
 			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("reaching current leader %s to provision join credentials: %v", leaderAddress, forwardErr), LeaderHint: leaderAddress}, nil
@@ -1114,6 +1171,7 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	}
 	if addResp.GetError() != "" {
 		if addResp.GetLeaderHint() != "" && s.peers != nil {
+			s.stampPeerEpoch(ctx, req)
 			var fwd *rpcpb.ApproveJoinRequestResponse
 			if fwd, forwardErr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); forwardErr == nil {
 				return fwd, nil
@@ -1154,6 +1212,7 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
 	var ferr error
 	if leaderHint != "" && s.peers != nil {
+		s.stampPeerEpoch(ctx, req)
 		var fwd *rpcpb.ApproveJoinRequestResponse
 		if fwd, ferr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
@@ -1336,6 +1395,12 @@ func (s *Server) PreflightApproveJoinRequest(ctx context.Context, req *rpcpb.Pre
 // the symmetric decline action. Never touches raft membership at all -
 // just marks the record Rejected.
 func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
+	// ADR-0156 Stage 2: refuse a caller that is behind this Colony's
+	// GENERATION - see ApproveJoinRequest's own comment for why the
+	// check lives here rather than in the FSM.
+	if err := s.checkPeerEpoch(ctx, req.GetColonyEpoch()); err != nil {
+		return &rpcpb.RejectJoinRequestResponse{Error: err.Error()}, nil
+	}
 	if msg := s.expiredJoinRequestMessage(ctx, req.GetRequestId(), "RejectPendingJoinRequest"); msg != "" {
 		return &rpcpb.RejectJoinRequestResponse{Error: msg}, nil
 	}
@@ -1347,6 +1412,7 @@ func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinReq
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
 	var ferr error
 	if leaderHint != "" && s.peers != nil {
+		s.stampPeerEpochReject(ctx, req)
 		var fwd *rpcpb.RejectJoinRequestResponse
 		if fwd, ferr = s.peers.RejectJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
@@ -1372,6 +1438,12 @@ func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinReq
 // there instead of acting on this node's own local raft, since the
 // request itself may live on a remote Colony member.
 func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	// ADR-0156 Stage 2: refuse a caller that is behind this Colony's
+	// GENERATION - see ApproveJoinRequest's own comment for why the
+	// check lives here rather than in the FSM.
+	if err := s.checkPeerEpoch(ctx, req.GetColonyEpoch()); err != nil {
+		return &rpcpb.CancelJoinRequestResponse{Error: err.Error()}, nil
+	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
@@ -1383,7 +1455,11 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 		// finding) - see RequestJoinColony's own identical comment above.
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
 		defer cancel()
-		resp, err := s.peers.CancelJoinRequestUnauthenticated(fctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
+		// ADR-0156 Stage 2: this node's own epoch travels with the
+		// forward, so the member that actually holds the request can
+		// refuse a stale-epoch caller rather than acting on it.
+		s.stampPeerEpochCancel(ctx, req)
+		resp, err := s.peers.CancelJoinRequestUnauthenticated(fctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs(), ColonyEpoch: req.GetColonyEpoch()})
 		if err != nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -1400,6 +1476,7 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
 	var ferr error
 	if leaderHint != "" && s.peers != nil {
+		s.stampPeerEpochCancel(ctx, req)
 		var fwd *rpcpb.CancelJoinRequestResponse
 		if fwd, ferr = s.peers.CancelJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil

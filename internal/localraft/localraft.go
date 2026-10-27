@@ -135,6 +135,23 @@ type Status struct {
 	// log, which is what a Comb waiting to be joined reports), so it must
 	// only be trusted when Query returned no error.
 	LastLogIndex uint64
+
+	// ColonyEpoch is ADR-0156 Stage 2's Colony generation counter, as
+	// this Comb's own raftd reports it from its REPLICATED state.
+	//
+	// It is carried here because `apiaryctl join-introduce` has to
+	// state this Comb's own generation on the join request: the
+	// admission refusal of a stale-epoch node works by comparing the
+	// joiner's claim against the Colony's own epoch, and a joiner that
+	// claims nothing is accepted for compatibility rather than
+	// checked. A joiner that can read its own epoch and does not
+	// state it would be opting out of the check for no reason.
+	//
+	// Zero means this Comb's raftd has no epoch recorded - either it
+	// predates ADR-0156 Stage 2, or it was restored from a snapshot
+	// that predates it. That is a real answer, not an error, and it
+	// travels as the "no claim" value.
+	ColonyEpoch uint64
 }
 
 // ListTrustedPeers returns ADR-0147 Part 4's replicated trust store as
@@ -202,5 +219,6 @@ func Query(ctx context.Context, configPath string) (Status, error) {
 		LeaderID:  resp.GetLeaderId(),
 
 		LastLogIndex: resp.GetLastLogIndex(),
+		ColonyEpoch:  resp.GetColonyEpoch(),
 	}, nil
 }

@@ -558,6 +558,14 @@ func (f *fakeClient) SetColonyDiskSize(context.Context, *rpcpb.SetColonyDiskSize
 	return nil, status.Error(codes.Unimplemented, "fakeClient does not implement SetColonyDiskSize")
 }
 
+// AdvanceColonyEpoch is ADR-0156 Stage 2's generation advance. The
+// fake refuses it by default rather than accepting silently, so a test
+// that exercises the write path has to say so explicitly instead of
+// inheriting a success that proves nothing.
+func (f *fakeClient) AdvanceColonyEpoch(context.Context, *rpcpb.AdvanceColonyEpochRequest, ...grpc.CallOption) (*rpcpb.AdvanceColonyEpochResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "fakeClient does not implement AdvanceColonyEpoch")
+}
+
 func (f *fakeClient) GetJoinRequestStatus(context.Context, *rpcpb.GetJoinRequestStatusRequest, ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	return &rpcpb.GetJoinRequestStatusResponse{}, nil
 }

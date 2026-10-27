@@ -721,6 +721,44 @@ message Command {
     // same bytes.
     SetColonyIdentity set_colony_identity = 47;
 
+    // SetColonyEpoch is ADR-0156 Stage 2's Colony epoch record: the
+    // monotonic generation counter that distinguishes two generations
+    // of the same Colony.
+    //
+    // A Colony ID alone cannot tell "this Colony" from "this Colony,
+    // before the last reset" - a node restored from an older snapshot
+    // holds an identity that matches and a state that does not. The
+    // epoch is the second anchor, and it is replicated rather than
+    // held in each node's configuration for the same reason the
+    // identity is: a value that lives in one process's memory is a
+    // value two Combs can disagree about, and two Combs disagreeing
+    // about which generation they are in is precisely the condition
+    // this record exists to make impossible.
+    //
+    // It is applied at most ONCE per Colony, exactly as
+    // SetColonyIdentity is, and the first one wins. ADR-0156's
+    // Decision 3 fixes the initial value at 1: there is nothing in
+    // the existing state from which a generation count could be
+    // recovered, so 1 is the only consistent starting value.
+    SetColonyEpoch set_colony_epoch = 56;
+
+    // AdvanceColonyEpoch moves this Colony to the next generation. It
+    // is the ONLY way the epoch ever changes after it is set.
+    //
+    // The apply function - not any handler - enforces the rules, so
+    // every replica decides the same thing from the same committed
+    // log entry: the new epoch must be EXACTLY the current one plus
+    // one, and the Colony must already have an epoch. A jump of two
+    // or more is refused as well as a repeat, because a gap would
+    // make the log lie about a transition that happened off-log.
+    //
+    // ADR-0156 says the command is issued only on a controlled reset
+    // or a full rebuild after the state is destroyed. This stage
+    // provides the command and its rules; it wires no caller to it
+    // yet - see ADR-0182's own "An advance is an explicit operator
+    // action, not an automatic one".
+    AdvanceColonyEpoch advance_colony_epoch = 57;
+
     // RenameVMIdentity is ADR-0152's dedicated logical-identity rename:
     // it moves a VM's record from one map key to another, changing
     // ONLY VMDefinition.id, in a single atomic FSM apply.
@@ -845,6 +883,91 @@ message SetColonyIdentity {
   // created_unix is the submitting node's clock at the moment it
   // generated the identity.
   int64 created_unix = 3;
+}
+
+// ColonyEpoch is ADR-0156 Stage 2's Colony generation counter: the
+// monotonic value that distinguishes two generations of the same
+// Colony.
+//
+// There is exactly one of these per Colony. "No epoch recorded" is
+// the ABSENCE of any SetColonyEpoch entry in the log - the same
+// shape ColonyIdentity and ColonyDiskSize use - which is why an epoch
+// of 0 is refused rather than treated as unset.
+//
+// The epoch is a counter, not a clock and not a hash. ADR-0156 is
+// explicit that HashiCorp Raft's own term cannot serve this purpose:
+// Raft's term is per-cluster, not per-Colony, and two independently
+// bootstrapped clusters both start at term 1 and both increment from
+// there, so their terms are unrelated numbers that only LOOK
+// comparable. Treating them as a shared sequence would be exactly the
+// comparison that falsely concludes "same epoch, no conflict" in the
+// split-leader case.
+message ColonyEpoch {
+  // epoch is the Colony's current generation. It starts at 1 and
+  // advances by exactly one per generation change. It never
+  // decreases, and it is never set to an arbitrary value after the
+  // first SetColonyEpoch.
+  uint64 epoch = 1;
+
+  // previous_epoch is the generation this one superseded, and is 0
+  // for the initial epoch 1. It is replicated alongside the epoch
+  // itself so that a node which finds itself holding a generation can
+  // see what it superseded, rather than having to infer the sequence
+  // from a log it may have joined halfway through.
+  uint64 previous_epoch = 2;
+
+  // set_by is the node ID of the member that submitted the change,
+  // recorded for the audit trail exactly as ColonyIdentity's set_by
+  // is.
+  string set_by = 3;
+
+  // set_at_unix is the submitting node's clock at the moment the
+  // change was applied.
+  int64 set_at_unix = 4;
+}
+
+// SetColonyEpoch establishes a Colony's epoch. It is applied at most
+// once per Colony - see ColonyEpoch's own doc comment for why a
+// second one is refused rather than ignored.
+//
+// The apply function is the ONLY place that decides whether the epoch
+// is accepted, for the same reason ColonyIdentity's and
+// ColonyDiskSize's rules live there and not in a handler: the
+// decision has to be made identically on every replica, from the same
+// log entry.
+message SetColonyEpoch {
+  // epoch is the proposed initial epoch. Must be 1: ADR-0156's
+  // Decision 3 fixes the starting value for an existing Colony at 1,
+  // because there is nothing in the existing state from which a
+  // generation count could be recovered.
+  uint64 epoch = 1;
+
+  // set_by is the node ID of the member submitting the epoch.
+  string set_by = 2;
+
+  // set_at_unix is the submitting node's clock at the moment it
+  // established the epoch.
+  int64 set_at_unix = 3;
+}
+
+// AdvanceColonyEpoch moves a Colony to the next generation. It is the
+// only way the epoch ever changes after it is set.
+//
+// The apply function enforces the increment rules, and refuses by
+// name rather than clamping - see internal/raft/colonyepoch.go for
+// the full reasoning and for why a gap in the sequence is refused as
+// well as a repeat.
+message AdvanceColonyEpoch {
+  // epoch is the epoch being moved TO. Must be exactly the current
+  // epoch plus one.
+  uint64 epoch = 1;
+
+  // set_by is the node ID of the member submitting the advance.
+  string set_by = 2;
+
+  // set_at_unix is the submitting node's clock at the moment the
+  // advance was applied.
+  int64 set_at_unix = 3;
 }
 
 // ApiKey is a cluster-wide credential for ManagerService's external
@@ -1495,6 +1618,27 @@ message PendingJoinRequest {
   // was before, and the resulting member inherits the Colony's
   // identity from the Colony itself rather than asserting one.
   string colony_id = 24;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // JOINING node claims to be joining, as stated by the joining node
+  // at request time.
+  //
+  // It is recorded on the replicated request for the same reason
+  // colony_id above is: so the Colony accepting the join can compare
+  // the joiner's claim against its own replicated epoch, and refuse a
+  // node that belongs to a different generation of this Colony.
+  //
+  // The comparison lives in the FSM's apply function, not in a
+  // handler, so every replica refuses the same join the same way.
+  //
+  // Zero means the joining node made no claim, which is what every
+  // node built before ADR-0156 Stage 2 does. Such a request is
+  // accepted exactly as it was before, and the resulting member
+  // inherits the Colony's epoch from the Colony rather than asserting
+  // one. Zero is deliberately NOT recorded as a claim of epoch 0 -
+  // there is no epoch 0, and the audit trail distinguishes "claimed
+  // epoch 1" from "claimed nothing" from "claimed epoch 9".
+  uint64 colony_epoch = 25;
 }
 
 // JoinApprovalAttestation is one recorded "I am authorizing this join"
@@ -2628,6 +2772,18 @@ message FSMSnapshotState {
   // because the restored node would simply look like a fresh
   // bootstrap with an empty state.
   ColonyIdentity colony_identity = 17;
+
+  // colony_epoch is ADR-0156 Stage 2's Colony generation counter. It
+  // is included here for the same reason colony_identity and
+  // colony_disk_size are: a raft snapshot restore, or a seeded
+  // recovery via raftd -restore, must never silently drop the
+  // Colony's epoch. A dropped epoch would restore a node that
+  // believes it belongs to no generation at all, and the refusal of
+  // stale-epoch nodes that this record exists to provide would then
+  // have nothing to compare against. The digest (ADR-0143) is derived
+  // from this message's own descriptor, so it picks the field up with
+  // no second list to forget.
+  ColonyEpoch colony_epoch = 19;
 }
 
 // ConfigArchive is the on-disk file format for raftd's -export/

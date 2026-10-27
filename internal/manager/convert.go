@@ -205,6 +205,12 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		// through so the operator reviewing the request can see which
 		// Colony the joiner said it was joining.
 		ColonyId: r.GetColonyId(),
+		// ADR-0156 Stage 2: the Colony GENERATION the joiner
+		// claimed, carried through for the same reason. Zero means the
+		// joiner made no claim, which is deliberately not the same as
+		// a claim of epoch 0 - the audit trail distinguishes "claimed
+		// epoch 1" from "claimed nothing".
+		ColonyEpoch: r.GetColonyEpoch(),
 	}
 }
 

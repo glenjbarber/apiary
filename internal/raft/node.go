@@ -94,6 +94,20 @@ type Status struct {
 	// applied no SetColonyIdentity, or it was restored from a snapshot
 	// predating ADR-0156. That is a real state, not an error.
 	ColonyID string
+
+	// ColonyEpoch is this Colony's GENERATION (ADR-0156 Stage 2) -
+	// the monotonic counter that distinguishes two generations of the
+	// same Colony. It is read from the node's REPLICATED state, on
+	// the same terms as ColonyID above: a node answering from its own
+	// configuration would be answering a different question, and a
+	// node restored from an older snapshot WOULD answer differently
+	// from the Colony it is trying to rejoin.
+	//
+	// Zero means this node has no epoch yet - either it has applied
+	// no SetColonyEpoch, or it was restored from a snapshot predating
+	// ADR-0156 Stage 2. That is a real state, not an error, and it is
+	// exactly parallel to an empty ColonyID above.
+	ColonyEpoch uint64
 }
 
 // ServerInfo describes one member of the cluster configuration.
@@ -268,6 +282,27 @@ func (n *Node) watchLeadership() {
 				continue
 			}
 			n.logf("Colony identity is %s", colonyID)
+			// ADR-0156 Stage 2: the epoch is established by the
+			// leader too, and for exactly the same reason the
+			// identity is - leadership is not fixed at startup,
+			// so a node that later wins an election must be able
+			// to establish it, and a node restarting into an
+			// existing Colony must not need a second one.
+			//
+			// The "already set" refusal in the apply function
+			// makes every repetition harmless, exactly as it does
+			// for the identity above.
+			epoch, err := n.EnsureColonyEpoch(colonyIdentityCommitTimeout)
+			if err != nil {
+				select {
+				case <-n.shutdownCh:
+					return
+				default:
+				}
+				n.logf("could not establish the Colony epoch: %v", err)
+			} else {
+				n.logf("Colony epoch is %d", epoch)
+			}
 			if err := WriteColonySidecar(n.config.DataDir, colonyID, n.config.NodeID); err != nil {
 				// The sidecar is a guard's HINT, not the
 				// authority on identity, so failing to write
@@ -419,6 +454,129 @@ func (n *Node) EnsureColonyIdentity(timeout time.Duration) (string, error) {
 	return result.GetColonyIdentity().GetColonyId(), nil
 }
 
+// EnsureColonyEpoch makes sure this Colony has an epoch, and is the
+// only way one is ever established.
+//
+// The epoch is always the initial one, because ADR-0156's Decision 3
+// fixes the starting value for an existing Colony at 1 and the epoch
+// advances by a separate command (AdvanceColonyEpoch) rather than by
+// being established at whatever value the caller felt like.
+//
+// WHY IT IS COMMITTED RATHER THAN WRITTEN LOCALLY: the same reason
+// EnsureColonyIdentity's own comment gives. A value held in one
+// process's memory is a value two Combs can disagree about, and two
+// Combs disagreeing about which generation they are in is exactly the
+// condition the epoch exists to make impossible.
+//
+// WHY IT IS SAFE TO CALL THIS ON EVERY LEADERSHIP ACQUISITION: the
+// "already set" decision lives in the FSM's apply function, not here.
+// A Colony that already has an epoch has that second SetColonyEpoch
+// REFUSED by the apply function, and the refusal is the expected
+// outcome, not an error. This method is therefore idempotent from the
+// caller's point of view: it returns the Colony's epoch, which is the
+// pre-existing one in that case.
+//
+// The one case where this cannot apply is a node that is not the
+// leader - it cannot commit anything, and it has no epoch to report
+// because it has not been told one yet.
+func (n *Node) EnsureColonyEpoch(timeout time.Duration) (uint64, error) {
+	// An existing epoch is reported as-is. This is the common case on
+	// every restart of a Colony that is already running.
+	if existing := n.fsm.ColonyEpoch(); existing != 0 {
+		return existing, nil
+	}
+
+	if n.raft.State() != raft.Leader {
+		return 0, fmt.Errorf("raft: cannot establish a Colony epoch: this node is %s, not the leader, and only the leader can commit one", n.raft.State().String())
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetColonyEpoch{
+			SetColonyEpoch: &internalpb.SetColonyEpoch{
+				Epoch:     initialColonyEpoch,
+				SetBy:     n.config.NodeID,
+				SetAtUnix: time.Now().Unix(),
+			},
+		},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return 0, fmt.Errorf("marshaling the Colony epoch command: %w", err)
+	}
+
+	result, err := n.Apply(payload, timeout)
+	if err != nil {
+		return 0, fmt.Errorf("committing the Colony epoch: %w", err)
+	}
+	if result.Error != "" {
+		// A refusal because the Colony ALREADY has an epoch is not a
+		// failure - it is a race we lost, for exactly the reason
+		// EnsureColonyIdentity's own comment gives. Reading the
+		// epoch back from the FSM is what makes this correct: the
+		// winner's value is the committed one, so reading it after
+		// the refusal returns exactly the value every other voter
+		// will also hold.
+		if existing := n.fsm.ColonyEpoch(); existing != 0 {
+			return existing, nil
+		}
+		return 0, fmt.Errorf("committing the Colony epoch: %s", result.Error)
+	}
+	return result.GetColonyEpoch().GetEpoch(), nil
+}
+
+// AdvanceColonyEpoch moves this Colony to the next generation.
+//
+// The rules - advance by exactly one, and never downwards - are
+// enforced in the FSM's apply function rather than here, so every
+// replica decides them identically from the same committed log. This
+// method's job is only to submit the command and report what the FSM
+// decided.
+//
+// WHO CALLS THIS: ADR-0156 says the epoch is advanced on a controlled
+// reset of the Colony, or on a full rebuild after the state is
+// destroyed. This stage provides the command and its rules; it wires
+// no caller to it yet, because the reset path that would want to call
+// it is a reset that PRESERVES the Colony's identity while
+// superseding its generation, and that is ADR-0156's Stage 3
+// (sidecar and restore semantics) territory. A deliberate
+// `raftd -reset` today MOVES THE WHOLE DATA DIRECTORY ASIDE, sidecar
+// included, and the next start forms a genuinely new Colony with a new
+// identity and epoch 1 - which is Stage 1's documented behaviour, not
+// a generation change of an existing Colony.
+func (n *Node) AdvanceColonyEpoch(timeout time.Duration) (uint64, error) {
+	if n.raft.State() != raft.Leader {
+		return 0, ErrNotLeader
+	}
+
+	current := n.fsm.ColonyEpoch()
+	if current == 0 {
+		return 0, fmt.Errorf("raft: cannot advance the Colony epoch: this Colony has no epoch recorded yet")
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_AdvanceColonyEpoch{
+			AdvanceColonyEpoch: &internalpb.AdvanceColonyEpoch{
+				Epoch:     current + 1,
+				SetBy:     n.config.NodeID,
+				SetAtUnix: time.Now().Unix(),
+			},
+		},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return 0, fmt.Errorf("marshaling the Colony epoch advance command: %w", err)
+	}
+
+	result, err := n.Apply(payload, timeout)
+	if err != nil {
+		return 0, fmt.Errorf("committing the Colony epoch advance: %w", err)
+	}
+	if result.Error != "" {
+		return 0, fmt.Errorf("committing the Colony epoch advance: %s", result.Error)
+	}
+	return result.GetColonyEpoch().GetEpoch(), nil
+}
+
 // Apply submits payload to the raft log and waits up to timeout for it to
 // be committed and applied. It only succeeds when this node is the leader.
 func (n *Node) Apply(payload []byte, timeout time.Duration) (*FSMApplyResult, error) {
@@ -459,6 +617,7 @@ func (n *Node) Status() Status {
 		StateDigest:       n.fsm.StateDigest(),
 		PreferredLeaderID: n.config.PreferredLeaderID,
 		ColonyID:          n.fsm.ColonyID(),
+		ColonyEpoch:       n.fsm.ColonyEpoch(),
 	}
 }
 

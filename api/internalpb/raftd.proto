@@ -329,6 +329,25 @@ message StatusResponse {
   // as an error, because a node that has genuinely not been told yet
   // is still able to answer every other question on this response.
   string colony_id = 21;
+
+  // colony_epoch (ADR-0156 Stage 2) is this Colony's GENERATION - the
+  // monotonic counter that distinguishes two generations of the same
+  // Colony.
+  //
+  // It is served from the node's REPLICATED state, on exactly the same
+  // terms as the colony_id above: a node answering from its own
+  // configuration would be answering a different question, and a node
+  // restored from an older snapshot WOULD answer differently from the
+  // Colony it is trying to rejoin. That difference is the whole reason
+  // the epoch exists.
+  //
+  // ZERO means this node has no epoch yet: either it has applied no
+  // SetColonyEpoch, or it was restored from a snapshot that predates
+  // ADR-0156 Stage 2. That is a real, reportable state, and is
+  // deliberately NOT reported as an error, for the same reason an
+  // empty colony_id is not: a node that has genuinely not been told
+  // yet can still answer every other question on this response.
+  uint64 colony_epoch = 22;
 }
 
 message ServerInfo {

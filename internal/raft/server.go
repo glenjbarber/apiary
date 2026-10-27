@@ -123,6 +123,29 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.ColonyJoinWindow != nil {
 		payload = result.ColonyJoinWindow
 	}
+	// ColonyDiskSize is ADR-0148's floor result. It needs an arm of
+	// its own for the same reason the arms above do: without one, a
+	// successful raise would answer with zero bytes, which the
+	// managerd side unmarshals into a zero-valued floor - and a
+	// caller reading that would think no floor had been set.
+	if result.ColonyDiskSize != nil {
+		payload = result.ColonyDiskSize
+	}
+	// ColonyIdentity is ADR-0156 Stage 1's identity result, and needs
+	// an arm for the same reason: without one, a successful
+	// SetColonyIdentity would answer with zero bytes, which the
+	// managerd side unmarshals into an identity with no colony_id.
+	if result.ColonyIdentity != nil {
+		payload = result.ColonyIdentity
+	}
+	// ColonyEpoch is ADR-0156 Stage 2's epoch result, and needs an
+	// arm for the same reason: without one, a successful advance would
+	// answer with zero bytes, which the managerd side unmarshals into
+	// epoch 0 - and a caller reading that would think the Colony had
+	// not moved on.
+	if result.ColonyEpoch != nil {
+		payload = result.ColonyEpoch
+	}
 	// RenameVMIdentityResult carries BOTH the resulting VM and the
 	// outcome that distinguishes a rename applied by this apply from one
 	// that had already been applied and was proven to be the same
@@ -192,6 +215,12 @@ func (s *Server) Status(_ context.Context, _ *internalpb.StatusRequest) (*intern
 		// yet, which is a real state rather than an error - see
 		// Status.ColonyID's own doc comment.
 		ColonyId: status.ColonyID,
+		// ADR-0156 Stage 2: this Colony's GENERATION, served from
+		// replicated state on the same terms as the identity above.
+		// Zero when the node has no epoch yet, which is a real state
+		// rather than an error - see Status.ColonyEpoch's own doc
+		// comment.
+		ColonyEpoch: status.ColonyEpoch,
 	}, nil
 }
 

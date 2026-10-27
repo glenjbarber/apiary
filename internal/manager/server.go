@@ -124,6 +124,9 @@ type PeerForwarder interface {
 	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
 	RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error)
 	SetColonyDiskSize(ctx context.Context, addr string, req *rpcpb.SetColonyDiskSizeRequest) (*rpcpb.SetColonyDiskSizeResponse, error)
+	// AdvanceColonyEpoch forwards ADR-0156 Stage 2's generation advance
+	// to the Colony's leader, mirroring SetColonyDiskSize above.
+	AdvanceColonyEpoch(ctx context.Context, addr string, req *rpcpb.AdvanceColonyEpochRequest) (*rpcpb.AdvanceColonyEpochResponse, error)
 	CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error)
 	UpdateJail(ctx context.Context, addr string, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error)
 	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
@@ -1268,6 +1271,11 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	// disagreeing about which Colony they are in is the condition
 	// this feature exists to make impossible.
 	resp.RaftColonyId = raftStatus.GetColonyId()
+	// ADR-0156 Stage 2: this Colony's GENERATION, passed through from
+	// raftd's REPLICATED state on the same terms as the identity
+	// above. Zero when raftd has no epoch yet, which is a real state
+	// rather than an error.
+	resp.RaftColonyEpoch = raftStatus.GetColonyEpoch()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
 		resp.Members = append(resp.Members, &rpcpb.RaftMember{
