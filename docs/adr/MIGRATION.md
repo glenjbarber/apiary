@@ -6,6 +6,10 @@ Inventory at source revision `261e915`: 148 Markdown ADRs, numbered 0001
 through 0149 with 0126 absent. The first batch converts ADR-0001 through
 ADR-0007. The remaining 141 records retain their existing structure.
 
+The numbering migration map below has since been extended to cover every
+record now in `docs/adr/`, up to ADR-0181. See "Local renumbering,
+2026-10-27" below for the numbers that were reassigned.
+
 This is a structural conversion, not a new technical decision. Existing
 filenames, titles, legacy identifiers, links, decision text, rationale,
 references, and historical claims remain unchanged. `## Decisions` becomes
@@ -192,6 +196,35 @@ for all 148 records, including this structurally converted batch.
 | [ADR-0147](0147-automated-install-and-two-way-peer-authorized-join.md) | Unresolved | Pending Glen allocation | Remaining |
 | [ADR-0148](0148-colony-disk-size-floor.md) | Unresolved | Pending Glen allocation | Remaining |
 | [ADR-0149](0149-durable-colony-work-queue.md) | Unconfirmed | Pending Glen allocation | Converted |
+| [ADR-0150](0150-ai-agent-cell-api.md) | Unconfirmed | Pending Glen allocation | Remaining |
+| [ADR-0151](0151-ai-agent-cell-api-implementation.md) | Implemented | Pending Glen allocation | Remaining |
+| [ADR-0152](0152-atomic-vm-identity-rename.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0153](0153-configurable-base-image-disk-expansion.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0154](0154-frontend-restshimd-passthrough.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0155](0155-colony-certificate-authority.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0156](0156-colony-consensus-protocol.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0157](0157-colony-identity-stage-1.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0158](0158-hast-transport-tls.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0160](0160-native-monitoring-api.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0161](0161-zabbix-monitoring-integration.md) | Implemented | Pending Glen allocation | Remaining |
+| [ADR-0162](0162-apiary-mcp-server.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0163](0163-guided-colony-join-flow.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0164](0164-peer-allowlist-membership-derivation.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0166](0166-model-agnostic-mcp-tool-surface.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0167](0167-live-frontend-api-key.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0168](0168-zabbix-template-implementation.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0169](0169-prepared-certificate-reservations.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0170](0170-authorized-peer-trust-transition.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0171](0171-prepared-certificate-join-delivery.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0172](0172-guided-certificate-setup-walkthrough.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0173](0173-joiner-adopts-a-prepared-certificate.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0174](0174-provisioning-the-certificate-integration.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0176](0176-ui-redesign-remaining-work.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0177](0177-peer-trust-transition-operator-surface.md) | Proposed | Pending Glen allocation | Remaining |
+| [ADR-0178](0178-dedicated-vlan90-switch.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0179](0179-native-system-statistics-and-cluster-monitoring.md) | Superseded | Pending Glen allocation | Remaining |
+| [ADR-0180](0180-preferred-leader-bias.md) | Accepted | Pending Glen allocation | Remaining |
+| [ADR-0181](0181-hastd-fixes-in-freebsd-15-1-release.md) | Proposed | Pending Glen allocation | Remaining |
 
 ## Section review backlog
 
@@ -271,3 +304,44 @@ of that notification design remains an unanswered question. All historical
 implementation claims remain source claims, not new verification. The initial
 batch remains seven records; eight records are now structurally converted
 and 140 remain. Global number allocation remains outstanding.
+
+## Local renumbering, 2026-10-27
+
+**This is an apiary-local allocation, not a central one.** The "Shared
+register destination" column above still reads "Pending Glen allocation"
+for every record, and that is still true: no ADR in this repository has a
+number allocated in the shared Loreloom register. What changed on
+2026-10-27 is only that the *apiary-local* `docs/adr/` numbering became
+unique, so that a reference to an ADR number in this repository resolves
+to exactly one record.
+
+Until then, the number 0150 was claimed by four files and 0152 by two,
+so "ADR-0150" and "ADR-0152" were ambiguous everywhere they appeared -
+in code comments, in other ADRs, and in this index. The collisions were
+closed by keeping the number with the record that main history treats as
+canonical, and moving the others to free numbers:
+
+| Former number | Record | Now | Why this record kept the number |
+| --- | --- | --- | --- |
+| 0150 | `0150-ai-agent-cell-api.md` | ADR-0150 | The AI-agent cell API. Referenced by the code (`internal/cellrecommend`, the `CreateCell`/`RecommendCellType` RPCs in `api/rpc/manager.proto`, the REST shim) and amended by ADR-0151. |
+| 0150 | `0150-dedicated-vlan90-switch.md` | ADR-0178 | The VLAN 90 switch. No code or cross-ADR reference names it. |
+| 0150 | `0150-native-system-statistics-and-cluster-monitoring.md` | ADR-0179 | The native system-statistics proposal. Superseded by ADR-0160 for the monitoring API design. |
+| 0150 | `0150-preferred-leader-bias.md` | ADR-0180 | The preferred-leader bias. Implemented as `internal/raft`'s `PreferredLeaderTransfer` and referenced by the code. |
+| 0152 | `0152-atomic-vm-identity-rename.md` | ADR-0152 | The atomic VM identity rename. Implemented by PR #173, and referenced throughout `internal/raft`, `internal/cluster`, `internal/manager` and the RPC schema. |
+| 0152 | `0152-hastd-fixes-in-freebsd-15-1-release.md` | ADR-0181 | The upstream hastd/hastctl fixes in FreeBSD 15.1-RELEASE. |
+
+0178, 0179, 0180 and 0181 were free in the tree when the collisions were
+closed. 0175 is held by the certificate-renewal-lifecycle work and 0176
+and 0177 are already in use, so the new numbers start above them.
+
+Every reference to a moved record was updated in the same commit: the
+header, the filename, the `Legacy identifier` line, code comments in
+`internal/`, `api/`, `cmd/`, and `web/`, and cross-references in other
+ADRs, in `README.md` and in `docs/bootstrap.md`. The moved records carry
+a "Merge note" recording the renumbering, in the same form ADR-0098 and
+ADR-0055 use.
+
+**The gap at 0126 remains open.** 0153, which was also a gap when the
+2026-10-24 audit recorded it, is now `0153-configurable-base-image-disk-expansion.md`.
+0126 is still absent and is recorded in the 2026-10-24 code audit as an
+intentional reserve pending central allocation, not a lost file.

@@ -113,9 +113,9 @@ caller's behalf. The underlying secret-in-plaintext concern ADR-0067
 raised (a live `-peer-api-key` readable by any local user) is still real,
 but its fix is key rotation/storage, not a file-permission deviation from
 the OS default.
-## Superseded in part by ADR-0152
+## Superseded in part by ADR-0181
 
-[ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
+[ADR-0181](0181-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
 statement above that the hastd source patch is permanently
 operator-owned: on FreeBSD 15.1-RELEASE and later, no such patch is
 needed, so there is nothing for `apiaryinstall`'s HAST check to flag

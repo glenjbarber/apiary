@@ -1077,7 +1077,7 @@ repeating this workaround indefinitely.
   but never configures it. On FreeBSD 15.1-RELEASE or later, Apiary's
   supported floor, it reports `ok` once `hastd_enable=YES`, since that
   release carries the upstream hastd/hastctl fixes this project needed
-  (ADR-0152). On an earlier release it reports `manual` with an upgrade
+  (ADR-0181). On an earlier release it reports `manual` with an upgrade
   hint. See ADR-0026 for what real setup requires.
 - **`internal_token`/raft transport TLS for a multi-node join** - step 7
   Path B covers the SSH-tunnel mechanics `join` needs across hosts and

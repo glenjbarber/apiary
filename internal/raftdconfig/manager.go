@@ -100,7 +100,7 @@ type Config struct {
 
 	// PreferredLeaderID, if set, names the node_id that should hold
 	// raft leadership whenever it can be given to them safely (see
-	// raftnode.Config.PreferredLeaderID and ADR-0150). Empty - the
+	// raftnode.Config.PreferredLeaderID and ADR-0180). Empty - the
 	// default - means no preference: leadership is left entirely to
 	// raft's own election process, unchanged from before this field
 	// existed. Safe to set to a node that has not joined yet, or to

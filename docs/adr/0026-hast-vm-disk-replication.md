@@ -10,7 +10,7 @@ All four project machines (`freebsd-apiary`, `freebsd-apiary2`,
 `freebsd-apiary3` - VMs, no nested-virt, can't run bhyve - and
 `apiarium` - real hardware, the only bhyve-capable node) run a patched
 `hastd` (ADR-0008/D57511) confirmed to actually replicate. **Update:**
-as of [ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md), that
+as of [ADR-0181](0181-hastd-fixes-in-freebsd-15-1-release.md), that
 patch is a requirement of these machines' then-current release, not of
 HAST replication itself - the upstream fixes are in every supported
 FreeBSD release, and Apiary's supported floor is 15.1-RELEASE, so nodes

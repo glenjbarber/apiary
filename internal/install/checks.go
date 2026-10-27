@@ -1135,7 +1135,7 @@ var uplinkBridgingCheck = Check{
 	},
 }
 
-// ---- HAST (report-only: the baseline release carries the fix, ADR-0152) ----
+// ---- HAST (report-only: the baseline release carries the fix, ADR-0181) ----
 
 // freebsdReleaseRe matches the leading "<major>.<minor>" of FreeBSD's own
 // `uname -r` output (e.g. "15.1-RELEASE", "14.2-RELEASE-p3",
@@ -1146,7 +1146,7 @@ var freebsdReleaseRe = regexp.MustCompile(`^(\d+)\.(\d+)`)
 
 // freebsdReleaseAtLeast151 reports whether release (raw `uname -r`
 // output) is FreeBSD 15.1 or later - Apiary's supported floor, and the
-// baseline ADR-0152 sets for needing no locally built or patched
+// baseline ADR-0181 sets for needing no locally built or patched
 // hastd/hastctl. An unparseable release string reports false (fails
 // closed: never silently assume the upstream fixes are present).
 func freebsdReleaseAtLeast151(release string) bool {
@@ -1183,13 +1183,13 @@ var hastdEnableCheck = Check{
 		if releaseErr != nil {
 			return Result{ID: "hastd-enable", Status: StatusManual,
 				Detail:  "hastd_enable=YES, but the running release could not be read (`uname -r`): " + firstNonEmpty(releaseErrOut, releaseErr),
-				FixHint: "confirm this host runs FreeBSD 15.1-RELEASE or later, Apiary's supported floor, before relying on hastd (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md)"}
+				FixHint: "confirm this host runs FreeBSD 15.1-RELEASE or later, Apiary's supported floor, before relying on hastd (see docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md)"}
 		}
 		release = strings.TrimSpace(release)
 		if !freebsdReleaseAtLeast151(release) {
 			return Result{ID: "hastd-enable", Status: StatusManual,
 				Detail:  fmt.Sprintf("hastd_enable=YES, running %s", release),
-				FixHint: "upgrade to FreeBSD 15.1-RELEASE or later, Apiary's supported floor, which carries the upstream hastd/hastctl fixes (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md)"}
+				FixHint: "upgrade to FreeBSD 15.1-RELEASE or later, Apiary's supported floor, which carries the upstream hastd/hastctl fixes (see docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md)"}
 		}
 		return Result{ID: "hastd-enable", Status: StatusOK, Detail: fmt.Sprintf("hastd_enable=YES, running %s", release)}
 	},

@@ -239,7 +239,7 @@ func run() error {
 		Results:   restartplan.NewResultStore(restartplan.DefaultResultDir),
 	})
 
-	// Preferred-leader biasing (issue #20, ADR-0150): only started when
+	// Preferred-leader biasing (issue #20, ADR-0180): only started when
 	// a preference is actually configured, so a Colony with no
 	// preference pays nothing extra - not even an idle ticker. Runs for
 	// the lifetime of the process, same ctx as everything else above;

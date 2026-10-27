@@ -147,7 +147,7 @@ each design decision, in order.
   in for real — see below. The upstream fixes this project needed are
   in every supported FreeBSD release, so a stock install needs no locally
   built or patched `hastd`/`hastctl` - see
-  [ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md).
+  [ADR-0181](docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md).
 - **Real HAST-backed VM disk replication** — a VM can name a
   `replica_node_id` (caller-set, like `node_id`) and its disk is then
   replicated to that node for real data redundancy - not automatic
@@ -814,7 +814,7 @@ each design decision, in order.
   never attempts them. HAST is report-only too: on FreeBSD 15.1-RELEASE or
   later, Apiary's supported floor, it just confirms `hastd_enable=YES`,
   since that release carries the upstream fixes
-  ([ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md)); on an
+  ([ADR-0181](docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md)); on an
   earlier release it reports manual with an upgrade hint. See
   [ADR-0082](docs/adr/0082-apiary-installer-preflight.md) for the design
   and the focused runbooks for [creating a standalone

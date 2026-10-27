@@ -93,7 +93,7 @@ The proxy is controlled by a new frontend config field, `api_proxy_enabled`, def
 
 ### 6. Read-only option is deferred
 
-ADR-0153 proposes a Viewer-tier route list. This ADR does not limit the proxy to read routes. The proxy forwards whatever the allow-list permits, and managerd enforces role checks per RPC. Restricting the proxy to reads would be a further allow-list change and is left to Glen.
+ADR-0160 proposes a Viewer-tier route list. This ADR does not limit the proxy to read routes. The proxy forwards whatever the allow-list permits, and managerd enforces role checks per RPC. Restricting the proxy to reads would be a further allow-list change and is left to Glen.
 
 ## Consequences
 
@@ -113,7 +113,7 @@ ADR-0153 proposes a Viewer-tier route list. This ADR does not limit the proxy to
 
 These are for the implementer, not decisions:
 
-- Add the proxy in `internal/frontend`, with the allow-list in one table so it is testable, as ADR-0150 and ADR-0153 do for their route tables.
+- Add the proxy in `internal/frontend`, with the allow-list in one table so it is testable, as ADR-0179 and ADR-0160 do for their route tables.
 - Add a test that every allow-listed route corresponds to an RPC in `requiredRole`.
 - Add a test that a request to `/api/v1/*` without a cookie or bearer header is redirected or refused, and that the `Cookie` header never reaches restshimd.
 - Add a test that the proxy completes a real request against a TLS-serving upstream, so the scheme is decided by restshimd's config rather than assumed.

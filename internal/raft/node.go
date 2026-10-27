@@ -69,7 +69,7 @@ type Status struct {
 	StateDigest string
 
 	// PreferredLeaderID is this node's own configured
-	// Config.PreferredLeaderID (ADR-0150), empty when none is set. It
+	// Config.PreferredLeaderID (ADR-0180), empty when none is set. It
 	// is included here, alongside LeaderID, so that "who is leading"
 	// and "who is supposed to be leading" are visible together on the
 	// same status snapshot rather than requiring a caller to separately

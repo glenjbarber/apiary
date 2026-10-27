@@ -848,7 +848,7 @@ type RaftdConfigRecord struct {
 	NodeID   string `json:"node_id,omitempty"`
 	RaftBind string `json:"raft_bind,omitempty"`
 	// PreferredLeaderID names which Comb's node_id should hold leadership
-	// when the Colony is healthy (ADR-0150). It is public topology, the
+	// when the Colony is healthy (ADR-0180). It is public topology, the
 	// same class as NodeID above, not a credential, so it is recorded
 	// normally.
 	PreferredLeaderID string `json:"preferred_leader_id,omitempty"`

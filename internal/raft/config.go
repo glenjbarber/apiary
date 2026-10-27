@@ -40,7 +40,7 @@ type Config struct {
 
 	// PreferredLeaderID, if set, names the NodeID that should hold raft
 	// leadership whenever the cluster can safely give it to them (see
-	// PreferredLeaderTransfer and ADR-0150). Empty means no preference
+	// PreferredLeaderTransfer and ADR-0180). Empty means no preference
 	// at all - the default - and leaves leadership entirely to raft's
 	// own election process, exactly as before this field existed.
 	//
