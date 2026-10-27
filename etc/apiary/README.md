@@ -6,7 +6,7 @@ This directory holds one reference config file per daemon, installed by
 
 There is no `apiaryctl.json.sample`, and that is not an omission.
 `apiaryctl` - the operator command line, installed beside the daemons at
-`/usr/local/libexec/apiary/apiaryctl` - has no configuration of its own.
+`/usr/local/sbin/apiaryctl` - has no configuration of its own.
 It reads the daemons' config files above and the restart guardrail's
 record directory, and every value it needs from either is already
 documented where that value lives. A sample of nothing is not a document.
@@ -556,9 +556,9 @@ Both are root-only and neither restarts a daemon or edits a config file.
 
 ```sh
 # First Comb of a new Colony only. Refuses if a CA exists.
-/usr/local/libexec/apiary/apiaryctl colony-ca init
+/usr/local/sbin/apiaryctl colony-ca init
 # Each Comb, once. Give every name and IP peers dial it by.
-/usr/local/libexec/apiary/apiaryctl colony-ca issue-raft --name HOST --ip IP
+/usr/local/sbin/apiaryctl colony-ca issue-raft --name HOST --ip IP
 ```
 
 `init` writes `/usr/local/etc/apiary/ca/ca.pem` (0644) and `ca.key` (0600).

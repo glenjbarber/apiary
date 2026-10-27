@@ -15,8 +15,10 @@ should be read as describing something that exists.
 `cmd/apiaryctl`. It restarts managerd and then raftd on this Comb,
 confirming each by its own listener port, and leaving the same
 pending-restart record a leased restart leaves. It is root-only and
-installed to `/usr/local/libexec/apiary/apiaryctl` alongside the
-daemons. There is no socket, no TUI, no command group, and no
+installed to `/usr/local/sbin/apiaryctl`. **Amended 2026-10-27:** it
+was originally installed to `/usr/local/libexec/apiary/apiaryctl`
+alongside the daemons; the owner has moved it to
+`$LOCALBASE/sbin`, and the reasoning is under "Amendments" below. There is no socket, no TUI, no command group, and no
 managerd-backed client. Those come later, if they come at all.
 
 **Why it had to be this narrow, and why now.** The operational
@@ -773,7 +775,9 @@ greps the CLI's config struct for any token field and fails on one.
 - `SRCS += apiaryctl` so `make build` produces it.
 - `INSTALL_SRCS += apiaryctl` so it lands at
   `/usr/local/libexec/apiary/apiaryctl` via the existing `cp -p`/`mv`
-  rename.
+  rename. **Amended 2026-10-27:** `apiaryctl` is no longer in
+  `INSTALL_SRCS`; it is installed to `/usr/local/sbin/apiaryctl` by
+  the `install` rule's own step.
 - `INSTALL_SRCS_FILTERED` unchanged — the CLI has no rc.d script and
   `make update` must not try to restart it. (For reference, `89f21e8`
   changed this variable by removing `managerd`, which put `managerd`
@@ -783,7 +787,10 @@ greps the CLI's config struct for any token field and fails on one.
   the `0600` requirement are documented.
 - No symlink into `/usr/local/bin`; the project keeps daemons under
   `libexec/apiary` and a root-privileged tool in `bin` widens the
-  accidental-invocation surface.
+  accidental-invocation surface. **Amended 2026-10-27:** this is
+  superseded. `apiaryctl` is now installed **at**
+  `/usr/local/sbin/apiaryctl` rather than being kept out of a
+  directory on the operator's PATH. See "Amendments" below.
 
 ### Failure modes
 
@@ -942,3 +949,53 @@ bhyve, and no real-network behavior locally.
   reachable from the CLI)
 - `Makefile` — `SRCS`, `INSTALL_SRCS`, `INSTALL_SRCS_FILTERED`,
   `update`, and the `apiaryinstall` exclusion comment
+
+## Amendments
+
+### 2026-10-27: `apiaryctl` moves to `$LOCALBASE/sbin`
+
+**The decision.** `apiaryctl` is installed at
+`/usr/local/sbin/apiaryctl`, not at
+`/usr/local/libexec/apiary/apiaryctl`.
+
+**Why.** The reasoning above put the CLI in `libexec/apiary` with the
+daemons, on the grounds that "a root-privileged tool in `bin` widens
+the accidental-invocation surface". That was a reasonable reading when
+`apiaryctl` was one subcommand. It is not the right shape now, and
+the reason is what `apiaryctl` became.
+
+`apiaryctl` is an **operator** tool and the daemons are not. Every
+subcommand that touches the host - `install`, `force-restart`,
+`colony-ca`, `cert-setup` - needs root. The two that do not
+(`join-introduce`, `join-authorize`) are the two an operator runs on a
+**headless** host, where the whole point is that there is no source
+checkout and no README to read. A tool whose entire reason to exist is
+being run on a host with nothing else on it should not be hidden in
+the same directory as four daemons whose names the operator does not
+type.
+
+`$LOCALBASE/sbin` is where a system puts exactly that: a
+root-privileged administrative command, on the administrator's PATH,
+discoverable without knowing Apiary's internal directory layout.
+
+**What it costs.** The accidental-invocation surface does widen
+slightly, and that was the original objection. Two things bound it in
+practice:
+
+- `sbin` is not on an unprivileged user's PATH by default. It is
+  on root's, and every subcommand that could do damage already
+  refuses to run without root.
+- The daemons stay in `libexec/apiary`, so the two halves of the
+  install remain distinguishable by where they live:
+  `/usr/local/libexec/apiary` is the daemons, and
+  `/usr/local/sbin/apiaryctl` is the one command an operator types.
+
+**What did not change.** No subcommand's behaviour, no argument, no
+output. Only where the binary lands, and every path that refers to
+it.
+
+**The upgrade path.** A Comb that already has an `apiaryctl` in
+`libexec/apiary` keeps it; nothing removes it, because an install
+that silently deleted a binary another tool might still reference
+would be a worse problem than a stale copy. A fresh install, and
+`make install` on an existing Comb, put the new copy in `sbin`.
