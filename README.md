@@ -147,7 +147,7 @@ each design decision, in order.
   in for real — see below. The upstream fixes this project needed are
   in FreeBSD 15.1-RELEASE, so a vanilla 15.1-RELEASE-or-later install
   needs no locally built or patched `hastd`/`hastctl` - see
-  [ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md).
+  [ADR-0181](docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md).
 - **Real HAST-backed VM disk replication** — a VM can name a
   `replica_node_id` (caller-set, like `node_id`) and its disk is then
   replicated to that node for real data redundancy - not automatic
@@ -815,7 +815,7 @@ each design decision, in order.
   never attempts them. HAST is report-only too: on FreeBSD
   15.1-RELEASE or later it just confirms `hastd_enable=YES`, since the
   release itself carries the upstream fixes
-  ([ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md));
+  ([ADR-0181](docs/adr/0181-hastd-fixes-in-freebsd-15-1-release.md));
   on an earlier release it also flags that the `hast_proto_recv_hdr`
   source patch for FreeBSD bug 298085 is still needed before relying
   on hastd, and never applies it. See

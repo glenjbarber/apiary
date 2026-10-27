@@ -1,8 +1,16 @@
-# ADR-0150: Dedicated VLAN 90 switch for cluster nodes
+# ADR-0178: Dedicated VLAN 90 switch for cluster nodes
 
 Date: 2026-09-28
 
 Status: Accepted
+
+## Merge note (2026-10-27)
+
+This record was originally numbered ADR-0150. ADR-0150 was claimed by
+four files, so the number was ambiguous and could not identify a
+decision. It was renumbered to ADR-0178, which was free in the tree
+when the collision was closed. The number in the header, the filename
+and every reference to it were changed together; no content changed.
 
 ## Context
 

@@ -1,10 +1,10 @@
-# ADR-0150: Native system-statistics and cluster-monitoring API
+# ADR-0179: Native system-statistics and cluster-monitoring API
 
 Status: Superseded by ADR-0160 for the monitoring API design; historical proposal retained
 Supersedes: "Todo: Integrate bsnmpd with raftd to reduce state tracking" (Notion Todo, Apiary project - not an apiary-local ADR, so there is nothing in `docs/adr/` to mark superseded; this document records the supersession relationship on this side only. Resolving or re-numbering the Notion page is Glen's to do, not this document's.)
 Superseded by: ADR-0160 (monitoring API design)
 Affected projects: Apiary
-Legacy identifier: ADR-0150 (Apiary)
+Legacy identifier: ADR-0150 (Apiary), renumbered to ADR-0179 (Apiary)
 Loreloom identifier: Pending allocation by Glen - if this design is ever registered cross-project, allocating that number is Glen's to do, not this agent's. This document deliberately does not invent one.
 
 ## Status qualifications
@@ -38,6 +38,14 @@ and a list of the genuinely open questions for Glen to decide before
 any implementation begins. Section "Open questions" below is where
 those live; nothing stated as settled anywhere above that section
 should be read as more final than the status line says.
+
+## Merge note (2026-10-27)
+
+This record was originally numbered ADR-0150. ADR-0150 was claimed by
+four files, so the number was ambiguous and could not identify a
+decision. It was renumbered to ADR-0179, which was free in the tree
+when the collision was closed. The number in the header, the filename
+and every reference to it were changed together; no content changed.
 
 ## Context
 

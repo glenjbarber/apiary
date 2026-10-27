@@ -1,8 +1,16 @@
-# ADR-0150: Preferred-Leader Bias
+# ADR-0180: Preferred-Leader Bias
 
 ## Status
 
 Accepted
+
+## Merge note (2026-10-27)
+
+This record was originally numbered ADR-0150. ADR-0150 was claimed by
+four files, so the number was ambiguous and could not identify a
+decision. It was renumbered to ADR-0180, which was free in the tree
+when the collision was closed. The number in the header, the filename
+and every reference to it were changed together; no content changed.
 
 ## Context
 

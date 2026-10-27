@@ -378,9 +378,9 @@ provisioning depends on every node in the cluster reliably having a
 working `hastd`, not on one hand-built binary happening to work in a
 test.
 
-## Superseded in part by ADR-0152
+## Superseded in part by ADR-0181
 
-[ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
+[ADR-0181](0181-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
 requirement above for a locally built hastd with D57511 or D59521:
 FreeBSD 15.1-RELEASE and later carry the upstream fix for FreeBSD bug
 292322, so a node on that baseline needs no locally built or patched

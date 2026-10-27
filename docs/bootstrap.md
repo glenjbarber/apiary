@@ -1072,7 +1072,7 @@ repeating this workaround indefinitely.
 - **HAST (`-enable-hast`)** - `apiaryinstall` can check for `hastd_enable`
   but never configures it. On FreeBSD 15.1-RELEASE or later it reports
   `ok` once `hastd_enable=YES`, since that release carries the upstream
-  hastd/hastctl fixes this project needed (ADR-0152). On an earlier
+  hastd/hastctl fixes this project needed (ADR-0181). On an earlier
   release it reports `manual` with an upgrade hint, or a reminder that
   the `hast_proto_recv_hdr` source patch (ADR-0022, FreeBSD bug 298085)
   is still needed; that patch is never applied automatically. See

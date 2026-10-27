@@ -1,10 +1,10 @@
-# ADR-0152: Upstream hastd and hastctl fixes are in FreeBSD 15.1-RELEASE
+# ADR-0181: Upstream hastd and hastctl fixes are in FreeBSD 15.1-RELEASE
 
 Status: Proposed
 Supersedes: ADR-0008 (in part: the requirement for a locally built hastd with D57511 or D59521), ADR-0022 (in part: the requirement to patch hast_proto_recv_hdr for FreeBSD bug 298085), ADR-0082 (in part: the statement that the hastd source patch is permanently operator-owned)
 Superseded by: None
 Affected projects: Apiary
-Legacy identifier: ADR-0152 (Apiary)
+Legacy identifier: ADR-0152 (Apiary), renumbered to ADR-0181 (Apiary)
 Loreloom identifier: Pending allocation by Glen
 
 ## Status qualifications
@@ -14,6 +14,14 @@ The rest of each record stays in force, including the HAST configuration renderi
 The superseded records remain available as history.
 Dated 2026-10-14.
 Proposed means the wording has not been approved, and no approval date or approver is recorded here.
+
+## Merge note (2026-10-27)
+
+This record was originally numbered ADR-0152. ADR-0152 was claimed by
+two files, so the number was ambiguous and could not identify a
+decision. It was renumbered to ADR-0181, which was free in the tree
+when the collision was closed. The number in the header, the filename
+and every reference to it were changed together; no content changed.
 
 ## Context
 

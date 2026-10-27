@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. The prior ADR-0150 proposal is superseded for the monitoring API decisions recorded here; its historical analysis and unaccepted details remain preserved below.
+Proposed. The prior ADR-0179 proposal is superseded for the monitoring API decisions recorded here; its historical analysis and unaccepted details remain preserved below.
 
 **Implemented 2026-10-25 (issue #25).** The native half is now built: `ManagerService.GetMonitoringCluster` and `GetMonitoringNodes` return per-node measurement reports and the Colony's verdict, and the REST shim exposes them at `GET /v1/monitoring/health` and `GET /v1/monitoring/nodes`. Both are Viewer-tier, both are pull-only, and neither retains history.
 
@@ -14,7 +14,7 @@ Two decisions in the body needed sharpening during the implementation, and both 
 
 The REST half is now what ADR-0161's Zabbix template consumes, so #24 is unblocked.
 
-Supersedes: ADR-0150 monitoring proposal sections on API shape and unresolved monitoring choices
+Supersedes: ADR-0179 monitoring proposal sections on API shape and unresolved monitoring choices
 Superseded by: None
 Tracking issue: #25
 
@@ -22,7 +22,7 @@ Tracking issue: #25
 
 Apiary already exposes per-node HostStats and cluster-wide ClusterHealth through ManagerService, along with GetLocalNodeHealth. The reports are reads assembled on demand. HostStats describes local physical observations, while ClusterHealth derives a health verdict from independently collected evidence. ClusterHealth is not an atomic snapshot. These existing contracts are preferable foundations to a new monitoring daemon.
 
-The older ADR-0150 proposed a replicated periodic node-vitals report but explicitly left replication, API shape, interval, history, and summary fields open. High-churn physical counters are not replicated through Raft today. A new monitoring feature should not turn measurements into consensus traffic or present observations from different moments as one atomic fact.
+The older ADR-0179 proposed a replicated periodic node-vitals report but explicitly left replication, API shape, interval, history, and summary fields open. High-churn physical counters are not replicated through Raft today. A new monitoring feature should not turn measurements into consensus traffic or present observations from different moments as one atomic fact.
 
 The REST shim currently exposes GET /v1/health, backed by ClusterHealth. It is a separate gRPC-to-REST surface. There is no Prometheus exporter or general metrics endpoint. ManagerService read authorization uses the Viewer role; unknown RPCs default to Admin. The product policy distinguishes a read-only core from paid read-write capability, but the product boundary for basic external read-only access has not been decided.
 

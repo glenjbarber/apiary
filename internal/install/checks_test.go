@@ -240,7 +240,7 @@ func TestBhyveFirmwarePkgCheck(t *testing.T) {
 	})
 }
 
-// TestFreebsdReleaseAtLeast151 exercises the ADR-0152 baseline
+// TestFreebsdReleaseAtLeast151 exercises the ADR-0181 baseline
 // comparison directly, including the raw forms `uname -r` actually
 // emits (a trailing `-RELEASE`/`-STABLE`/`-pN`) and unparseable input,
 // which must fail closed (never silently assume the upstream fixes are
@@ -268,7 +268,7 @@ func TestFreebsdReleaseAtLeast151(t *testing.T) {
 	}
 }
 
-// TestHastdEnableCheck is the regression test for ADR-0152: the check
+// TestHastdEnableCheck is the regression test for ADR-0181: the check
 // must stop recommending the hast_proto_recv_hdr patch unconditionally
 // and instead check the installed release, staying report-only either
 // way.
