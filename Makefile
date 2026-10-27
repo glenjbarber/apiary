@@ -77,6 +77,17 @@ SRCS=		apiaryinstall \
 # buildinfo and versioncheck both report the -dirty case as weaker
 # evidence rather than as agreement.
 BUILD_ID?=	# empty: computed by scripts/build-ldflags.sh
+
+# BUILD_VERSION is the RELEASE version - "1.0.0-alpha" for the first
+# public release - and it is EMPTY for an ordinary build. It is a
+# separate thing from BUILD_ID, which is always the commit: the id is
+# what two binaries must agree on to be the same build, and the
+# version is what a human reads and what changes at a release.
+#
+#	make build BUILD_VERSION=1.0.0-alpha
+#	BUILD_VERSION=1.0.0-alpha make build
+BUILD_VERSION?=	# empty: not a release build
+
 BUILD_TIME?=	# empty: the commit's date, likewise computed there
 
 BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
@@ -105,7 +116,7 @@ PAM_SERVICE=	apiary
 build:
 	set -e; \
 	for S in ${SRCS} ; \
-		do ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH}` ; \
+		do ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' BUILD_VERSION='$(BUILD_VERSION)' ${LDFLAGS_SH}` ; \
 		$(GO_BUILD) -ldflags "$$ldflags" -o $$S ./cmd/$$S ;\
 	done
 

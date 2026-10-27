@@ -40,6 +40,13 @@
 #	BUILD_ID=release-1.0 BUILD_TIME=2026-09-26T00:00:00Z \
 #	    scripts/build-ldflags.sh
 #
+# THE RELEASE VERSION is a separate thing from the build id, and is set
+# with BUILD_VERSION. The build id is the commit, because that is what
+# two binaries must agree on to be called the same build. The version
+# is what a human reads, and it is what changes at a release. A binary
+# built from a release tag reports both: the commit it was built from,
+# and the version it belongs to.
+#
 # The Makefile passes BUILD_ID/BUILD_TIME through when they are set, so
 # both `make build BUILD_ID=x` and `BUILD_ID=x make build` work.
 set -e
@@ -219,6 +226,20 @@ fi
 id=${BUILD_ID:-}
 [ -n "$id" ] || id="$short$dirty"
 
+# The release version, when the build is a release build. Empty for an
+# ordinary build, and that is correct: an unstamped version means
+# "this is not a release", which is more honest than stamping the
+# branch name or the commit into a field that means "which release".
+#
+# It is validated rather than passed through, because it ends up in a
+# startup log line and a -version output that an operator reads and
+# quotes in a bug report. A version with a space or a quote in it
+# would make both of those ambiguous.
+version=${BUILD_VERSION:-}
+case "$version" in
+*' '*|*'"'*) echo "build-ldflags: BUILD_VERSION must not contain spaces or quotes: [$version]" >&2; exit 1 ;;
+esac
+
 # The commit's own date, not the clock. A date is worth having in a
 # startup log, and this one is a fixed property of the source, so it
 # costs no reproducibility.
@@ -234,7 +255,16 @@ if [ "${1:-}" = "--id" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "--version" ]; then
+	echo "$version"
+	exit 0
+fi
+
 # No inner quotes: go splits -ldflags on spaces and honours quotes, and
 # none of these three values can contain a space (checked above).
-printf -- '-X %s.BuildID=%s -X %s.BuildTime=%s -X %s.GitCommit=%s\n' \
+printf -- '-X %s.BuildID=%s -X %s.BuildTime=%s -X %s.GitCommit=%s' \
 	"$PKG" "$id" "$PKG" "$time" "$PKG" "$commit"
+if [ -n "$version" ]; then
+	printf -- ' -X %s.Version=%s' "$PKG" "$version"
+fi
+printf -- '\n'
