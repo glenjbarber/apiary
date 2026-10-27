@@ -2301,7 +2301,7 @@ type Command_AdvanceColonyEpoch struct {
 	// ADR-0156 says the command is issued only on a controlled reset
 	// or a full rebuild after the state is destroyed. This stage
 	// provides the command and its rules; it wires no caller to it
-	// yet - see ADR-0178's own "An advance is an explicit operator
+	// yet - see ADR-0182's own "An advance is an explicit operator
 	// action, not an automatic one".
 	AdvanceColonyEpoch *AdvanceColonyEpoch `protobuf:"bytes,57,opt,name=advance_colony_epoch,json=advanceColonyEpoch,proto3,oneof"`
 }

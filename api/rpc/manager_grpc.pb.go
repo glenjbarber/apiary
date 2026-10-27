@@ -1113,7 +1113,7 @@ type ManagerServiceClient interface {
 	// WHO CALLS THIS: ADR-0156 says the epoch is advanced on a
 	// controlled reset of the Colony, or on a full rebuild after the
 	// state is destroyed. This stage provides the command and its rules;
-	// it wires no operator flow to it yet - see ADR-0178's own "An
+	// it wires no operator flow to it yet - see ADR-0182's own "An
 	// advance is an explicit operator action, not an automatic one".
 	// A deliberate `raftd -reset` today moves the whole data directory
 	// aside, sidecar included, and the next start forms a genuinely new
@@ -3438,7 +3438,7 @@ type ManagerServiceServer interface {
 	// WHO CALLS THIS: ADR-0156 says the epoch is advanced on a
 	// controlled reset of the Colony, or on a full rebuild after the
 	// state is destroyed. This stage provides the command and its rules;
-	// it wires no operator flow to it yet - see ADR-0178's own "An
+	// it wires no operator flow to it yet - see ADR-0182's own "An
 	// advance is an explicit operator action, not an automatic one".
 	// A deliberate `raftd -reset` today moves the whole data directory
 	// aside, sidecar included, and the next start forms a genuinely new
