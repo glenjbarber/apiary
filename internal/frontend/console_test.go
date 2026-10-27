@@ -20,7 +20,7 @@ func TestServer_ConsolePage_AvailableShowsNoVNCWidget(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: "apiarium", Port: 5901},
 	}
-	s := newTestServer(t, client)
+	s := newTestServerTLS(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/console", nil)
 	rec := httptest.NewRecorder()
@@ -42,7 +42,7 @@ func TestServer_ConsolePage_UnavailableShowsErrorNotWidget(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: false},
 	}
-	s := newTestServer(t, client)
+	s := newTestServerTLS(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/console", nil)
 	rec := httptest.NewRecorder()
@@ -89,7 +89,7 @@ func TestServer_ConsoleRoutes_ViewerBlockedByRouteGate(t *testing.T) {
 func TestServer_ConsolePage_OperatorAllowed(t *testing.T) {
 	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: "apiarium", Port: 5901}}
 	roleMap := map[string]manager.Role{"ops": manager.RoleOperator}
-	s, err := NewServer(client, fakeAuthenticator{user: "ops", pass: "secret"}, roleMap, nil, "", "", nil, false)
+	s, err := NewServer(client, fakeAuthenticator{user: "ops", pass: "secret"}, roleMap, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestServer_ConsolePage_OperatorAllowed(t *testing.T) {
 
 func TestServer_ConsolePage_RPCErrorShownAsError(t *testing.T) {
 	client := &fakeClient{getVMConsoleErr: errors.New("managerd unreachable")}
-	s := newTestServer(t, client)
+	s := newTestServerTLS(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/console", nil)
 	rec := httptest.NewRecorder()
@@ -168,7 +168,7 @@ func TestServer_ConsoleWS_ProxiesBytesToAndFromVNCEndpoint(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestServer_ConsoleWS_RejectsCrossOriginUpgrade(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestServer_ConsoleWS_RejectsCrossOriginUpgrade(t *testing.T) {
 
 func TestServer_ConsoleWS_UnavailableConsoleRejectsUpgrade(t *testing.T) {
 	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: false}}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, true)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
