@@ -739,6 +739,20 @@
       .topbar-main { padding:10px 14px 0; flex-wrap:wrap; }
       .topbar-title { font-size:16px; }
       .topbar-search { flex:1 1 100%; margin-left:0; order:3; }
+      /* The actions row wraps instead of overflowing. It was flex:none
+         with nowrap children, so at phone width the row was wider than
+         the viewport and the "Log out" button was cut off at the right
+         edge - the page itself scrolled sideways, which the handoff's
+         section 12 rules out ("The page itself never scrolls
+         horizontally"). Wrapping the row, and letting the account
+         label and the badge shrink, keeps every action reachable. */
+      .topbar-actions {
+        flex:1 1 100%; flex-wrap:wrap; gap:6px; min-width:0;
+      }
+      .topbar-actions .account,
+      .topbar-actions .login-disabled {
+        min-width:0; overflow:hidden; text-overflow:ellipsis;
+      }
       .tabs { padding:0 14px; gap:16px; }
       /* Under 620px the cards go to one column, and the table hides
          Uptime and ZFS (handoff 12). */
