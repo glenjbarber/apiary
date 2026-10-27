@@ -15,9 +15,7 @@
 
 ![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/apiary)
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
-<!--
 [![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary)](https://github.com/glenjbarber/apiary/releases)
--->
 
 [![Book a consultation on Every Expert](https://img.shields.io/badge/Every%20Expert-Book%20a%20consultation-222222?style=for-the-badge)](https://www.everyexpert.com/glenjbarber)
 
@@ -76,6 +74,14 @@ exists and works end-to-end, from raft consensus up through a
 browser-facing UI, with real VM provisioning happening automatically
 underneath it. See [`docs/adr/`](docs/adr/) for the reasoning behind
 each design decision, in order.
+
+**The first public release is `1.0.0-alpha`** (tag `v1.0.0-alpha`). Its
+notes are [`docs/release-notes/1.0.0-alpha.md`](docs/release-notes/1.0.0-alpha.md),
+and they say plainly what it is and what it is not - the "Not yet
+implemented" list below is the authoritative one, and the release notes
+link to it rather than restating it. The version scheme, the tag
+convention, the branch model, and the release checklist are in
+[`docs/release-process.md`](docs/release-process.md).
 
 **Implemented and tested:**
 
@@ -1166,10 +1172,13 @@ resulting binary on a FreeBSD host to exercise them for real.
 Proto changes require [`buf`](https://buf.build) (`buf generate`);
 generated `.go` files are committed, so this isn't needed just to build.
 
-`cmd/frontend` links `internal/pam` (cgo) for real PAM login (ADR-0030)
-and can no longer be cross-compiled from macOS the way every other
-binary here can — build it natively on a real FreeBSD host instead.
-`managerd`/`raftd`/`restshimd` are unaffected.
+`cmd/managerd` links `internal/pam` (cgo) for real PAM login — ADR-0030
+introduced it in `cmd/frontend`, and ADR-0087 moved the
+authentication itself into `managerd` — so it cannot be cross-compiled
+from macOS the way every other binary here can. Build it natively on a
+real FreeBSD host instead. `frontend`/`raftd`/`restshimd`/`apiaryctl`/
+`apiaryinstall`/`versioncheck`/`apiary-mcp` are unaffected and are pure
+Go.
 
 ## License
 
