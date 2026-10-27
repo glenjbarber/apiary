@@ -36,8 +36,8 @@ Run these commands on Drone as an administrator. The marker is checked by
 requests; removing it resumes reporting on the next heartbeat interval.
 
 ```sh
-doas install -d -m 0755 /var/run/apiary
-doas touch /var/run/apiary/watchgoose.pause
+sudo install -d -m 0755 /var/run/apiary
+sudo touch /var/run/apiary/watchgoose.pause
 ```
 
 1. Record the time the marker was created. Leave Drone's network and services
@@ -46,7 +46,7 @@ doas touch /var/run/apiary/watchgoose.pause
 2. Resume reporting:
 
    ```sh
-   doas rm /var/run/apiary/watchgoose.pause
+   sudo rm /var/run/apiary/watchgoose.pause
    ```
 
 3. Wait up to one heartbeat interval. Confirm Watchgoose records a successful
