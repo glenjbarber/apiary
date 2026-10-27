@@ -22,6 +22,8 @@ type apiProxyRoute struct {
 var apiProxyRoutes = []apiProxyRoute{
 	{"GET /api/v1/status", "Status"},
 	{"GET /api/v1/health", "ClusterHealth"},
+	{"GET /api/v1/monitoring/health", "GetMonitoringCluster"},
+	{"GET /api/v1/monitoring/nodes", "GetMonitoringNodes"},
 	{"POST /api/v1/vms", "CreateVM"},
 	{"GET /api/v1/vms", "ListVMs"},
 	{"GET /api/v1/vms/{id}", "GetVM"},
