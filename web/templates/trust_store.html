@@ -16,6 +16,9 @@
       {{else}}
         <p class="field-help">
           Each Comb below is trusted by the certificate whose digest is shown.
+          A Comb whose certificate was issued by a certificate authority is trusted
+          <b>through that CA</b> - the CA is the anchor, and its digest is shown
+          beneath the certificate's - rather than through the certificate itself.
           A Comb with a <b>staged</b> certificate is trusted by BOTH certificates until the
           overlap ends or you activate the new one - that is what makes the swap safe
           whichever order it happens in.
@@ -42,7 +45,12 @@
                 <td>
                   {{if .IsVoter}}<span class="badge ok">Voter</span>{{else}}<span class="badge unknown">Nonvoter</span>{{end}}
                 </td>
-                <td><code>{{.Fingerprint}}</code></td>
+                <td>
+                  <code>{{.Fingerprint}}</code>
+                  {{if .CAFingerprint}}
+                    <div class="muted">via CA <code>{{.CAFingerprint}}</code></div>
+                  {{end}}
+                </td>
                 <td>
                   {{if .Expires}}<span class="badge {{.ExpiresClass}}">{{.Expires}}</span>{{else}}<span class="badge unknown">not recorded</span>{{end}}
                 </td>

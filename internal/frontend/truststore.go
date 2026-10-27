@@ -40,6 +40,14 @@ type trustStoreRow struct {
 	CombName string
 	// Fingerprint is the CURRENT certificate's digest.
 	Fingerprint string
+	// CAFingerprint is the digest of the CA that issued the current
+	// certificate, when it was issued by one. Empty means the
+	// certificate is self-signed and anchors itself.
+	//
+	// It is shown because the operator needs to see WHICH CA a Comb
+	// is trusted through: that is what peer-ca.pem holds, and it is
+	// the thing an incident review asks about.
+	CAFingerprint string
 	// Expires is the current certificate's expiry, rendered.
 	Expires string
 	// ExpiresClass is the badge class for that expiry.
@@ -96,10 +104,11 @@ func (s *Server) currentTrustStore(r *http.Request) (trustStoreView, string) {
 	now := time.Now()
 	for _, peer := range resp.GetPeers() {
 		row := trustStoreRow{
-			NodeID:      peer.GetNodeId(),
-			CombName:    peer.GetCombName(),
-			Fingerprint: peer.GetFingerprint(),
-			IsVoter:     peer.GetIsVoter(),
+			NodeID:        peer.GetNodeId(),
+			CombName:      peer.GetCombName(),
+			Fingerprint:   peer.GetFingerprint(),
+			CAFingerprint: peer.GetCaFingerprint(),
+			IsVoter:       peer.GetIsVoter(),
 		}
 		if peer.GetNotAfterUnix() > 0 {
 			expires := time.Unix(peer.GetNotAfterUnix(), 0)

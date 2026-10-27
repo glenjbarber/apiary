@@ -6451,7 +6451,30 @@ type TrustedPeer struct {
 	// entry written before ADR-0170 has. An older replica ignores this
 	// field entirely, so a staged certificate does not break a
 	// mixed-version Colony.
-	Next          *TrustedPeer `protobuf:"bytes,9,opt,name=next,proto3" json:"next,omitempty"`
+	Next *TrustedPeer `protobuf:"bytes,9,opt,name=next,proto3" json:"next,omitempty"`
+	// ca_pem is the ISSUING CA's certificate, for an entry whose
+	// certificate was issued by a certificate authority rather than
+	// signed by itself (ADR-0185).
+	//
+	// It is the trust ANCHOR, and it is what internal/peerca renders
+	// into peer-ca.pem in place of the leaf. That is the honest model
+	// for a Colony whose members hold publicly trusted certificates: a
+	// peer presents a LEAF, and the anchor that verifies it is the CA
+	// that signed it. Holding the leaf instead would mean each peer
+	// could only be verified by a pool holding its own exact leaf,
+	// which is a pin list, not a CA.
+	//
+	// Empty means the entry is a self-signed certificate that anchors
+	// itself - the shape every entry written before ADR-0185 has, and
+	// an older replica ignores this field entirely, so a mixed-version
+	// Colony is not broken by it.
+	CaPem string `protobuf:"bytes,10,opt,name=ca_pem,json=caPem,proto3" json:"ca_pem,omitempty"`
+	// ca_fingerprint is the digest of ca_pem, in the same
+	// "SHA256:" + colon-separated uppercase hex format as fingerprint
+	// above, and re-derived from ca_pem by the FSM rather than
+	// believed. It is what an operator compares to decide which CA a
+	// Comb is trusted through.
+	CaFingerprint string `protobuf:"bytes,11,opt,name=ca_fingerprint,json=caFingerprint,proto3" json:"ca_fingerprint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6547,6 +6570,20 @@ func (x *TrustedPeer) GetNext() *TrustedPeer {
 		return x.Next
 	}
 	return nil
+}
+
+func (x *TrustedPeer) GetCaPem() string {
+	if x != nil {
+		return x.CaPem
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetCaFingerprint() string {
+	if x != nil {
+		return x.CaFingerprint
+	}
+	return ""
 }
 
 // PinTrustedPeer writes one entry into the trust store, and is refused
@@ -9493,7 +9530,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x15CloseColonyJoinWindow\x12\x1b\n" +
 	"\tclosed_by\x18\x01 \x01(\tR\bclosedBy\x12\"\n" +
 	"\rclosed_by_key\x18\x02 \x01(\tR\vclosedByKey\x12\x19\n" +
-	"\bnow_unix\x18\x03 \x01(\x03R\anowUnix\"\xb9\x02\n" +
+	"\bnow_unix\x18\x03 \x01(\x03R\anowUnix\"\xf7\x02\n" +
 	"\vTrustedPeer\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tcomb_name\x18\x02 \x01(\tR\bcombName\x12 \n" +
@@ -9503,7 +9540,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x0epinned_at_unix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n" +
 	"\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n" +
 	"\bis_voter\x18\b \x01(\bR\aisVoter\x123\n" +
-	"\x04next\x18\t \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x04next\"E\n" +
+	"\x04next\x18\t \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x04next\x12\x15\n" +
+	"\x06ca_pem\x18\n" +
+	" \x01(\tR\x05caPem\x12%\n" +
+	"\x0eca_fingerprint\x18\v \x01(\tR\rcaFingerprint\"E\n" +
 	"\x0ePinTrustedPeer\x123\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x04peer\"I\n" +
 	"\x13SetTrustedPeerVoter\x12\x17\n" +

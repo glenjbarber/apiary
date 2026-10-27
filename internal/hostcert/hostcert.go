@@ -102,6 +102,25 @@ type Info struct {
 	KeyType     string
 	KeyBits     int
 	Signature   string
+
+	// CAAnchor is the certificate of the CA that ISSUED this
+	// certificate, when one was supplied, and the empty string when
+	// the certificate is self-signed and anchors itself.
+	//
+	// It is the trust anchor rather than the leaf, because a peer
+	// presents a leaf and the thing that verifies it is the CA that
+	// signed it. A Colony whose members hold publicly trusted
+	// certificates has exactly one CA to record, and recording the
+	// leaf instead would make the derived peer-ca.pem a pin list
+	// rather than a trust set.
+	//
+	// It is PEM, normalized, so it can be handed to crypto/x509 as
+	// a root directly.
+	CAAnchor string
+
+	// CAFingerprint is the digest of CAAnchor, in this package's
+	// fingerprint format. It is empty when CAAnchor is empty.
+	CAFingerprint string
 }
 
 // Expiry renders the certificate's own validity window in the form a
@@ -279,41 +298,110 @@ type EvaluateOptions struct {
 	// instance, where a CA-issued one would be a different identity
 	// than the one the operator configured.
 	AllowCAIssued bool
+
+	// CAAnchorPEM is the certificate of the CA that issued the
+	// certificate being evaluated.
+	//
+	// When it is set, the certificate being evaluated is checked
+	// AGAINST it - the CA must actually have signed it, and the CA
+	// must be a CA - and the CA becomes the trust anchor reported in
+	// Info.CAAnchor. That is the model ADR-0185 decides for a Colony
+	// whose members hold publicly trusted certificates: the store
+	// records the CA, and the derived peer-ca.pem holds the CA, so
+	// every member's leaf verifies against it.
+	//
+	// When it is empty, a self-signed certificate anchors itself and
+	// Info.CAAnchor is empty.
+	CAAnchorPEM []byte
 }
 
-// checkIssuerIsCA refuses a CA-issued certificate whose issuer is not
-// itself a certificate authority.
+// checkIssuerIsCA refuses a CA-issued certificate that carries no
+// BasicConstraints extension at all.
 //
-// The point of accepting a CA-issued certificate is that the CA becomes
-// the trust anchor: peer-ca.pem holds the CA, and each Comb's leaf
-// verifies against it. That only means anything if the issuer really is
-// a CA, so a certificate whose issuer carries no BasicConstraints CA
-// assertion is refused rather than accepted as an anchor that would
-// verify nothing.
-//
-// The issuer's own signature is NOT verified here. Verifying it means
-// walking the issuer's chain up to a root, which is what the trust
-// store's own verification does when the CA certificate is pinned: the
-// CA certificate in the store is the root of trust by construction,
-// and the leaf's chain to it is checked at handshake time. This gate
-// only asks the question that can be answered from the leaf alone.
+// The ISSUER's CA status is not knowable from the leaf alone - Go
+// exposes it on the issuer certificate, which is not here. So what is
+// checked is the leaf's own BasicConstraints extension, which is what
+// says "this certificate was issued under a CA's rules" rather than
+// "this certificate is a root". A leaf with no BasicConstraints at all
+// is refused: an issuer that says nothing about the hierarchy it
+// belongs to cannot anchor a trust decision, and refusing it is the
+// fail-closed choice.
 func checkIssuerIsCA(cert *x509.Certificate) error {
-	// An issuer that is not marked as a CA, or whose BasicConstraints
-	// are absent, cannot anchor a trust decision. Refusing it here is
-	// the fail-closed choice: a certificate that says nothing about
-	// being a CA is treated as not being one.
-	// The ISSUER's CA status is not knowable from the leaf alone -
-	// Go exposes it on the issuer certificate, which is not here. So
-	// what is checked is the leaf's own BasicConstraints extension,
-	// which is what says "this certificate was issued under a CA's
-	// rules" rather than "this certificate is a root". A leaf with no
-	// BasicConstraints at all is refused: an issuer that says nothing
-	// about the hierarchy it belongs to cannot anchor a trust
-	// decision, and refusing it is the fail-closed choice.
 	if !cert.BasicConstraintsValid {
 		return fmt.Errorf("hostcert: certificate is issued by %q but carries no BasicConstraints extension, so it cannot be a trust anchor", cert.Issuer.String())
 	}
 	return nil
+}
+
+// evaluateCAAnchor checks the supplied CA certificate against the
+// certificate being evaluated, and returns the CA's normalized PEM
+// and fingerprint.
+//
+// It is the check that makes a CA anchor HONEST. A CA that did not
+// sign the certificate would anchor nothing: the derived peer-ca.pem
+// would hold a certificate that verifies no peer's leaf, and the
+// failure would surface as an opaque TLS handshake error against a
+// host nobody could explain.
+//
+// Three things are checked, and each is a different operator problem:
+//
+//   - the CA certificate parses and is exactly one certificate;
+//   - the CA is a CA (BasicConstraints CA:true, and permitted to
+//     sign), because a leaf's issuer that is not a CA cannot anchor
+//     anything; and
+//   - the CA actually SIGNED this certificate, verified with
+//     CheckSignatureFrom.
+//
+// The CA's OWN chain is not walked here, and deliberately so. A
+// publicly trusted CA is a leaf-holder's chain up to a root in the
+// SYSTEM trust store, and the system store is not replicated state -
+// so requiring it to be verifiable here would make the pin depend on
+// a machine's certificate store rather than on the Colony's record.
+// The CA certificate in the store IS the root of trust by
+// construction, exactly as a pinned self-signed certificate is; what
+// is verified here is that it is the CA that signed this certificate,
+// which is the fact the store is making a claim about.
+func evaluateCAAnchor(cert *x509.Certificate, caPEM []byte, now time.Time) (string, string, error) {
+	der, err := singleCertificateDER(caPEM)
+	if err != nil {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate: %w", err)
+	}
+	ca, err := x509.ParseCertificate(der)
+	if err != nil {
+		return "", "", fmt.Errorf("hostcert: parsing the issuing CA certificate: %w", err)
+	}
+	// The CA must be a CA, and must be permitted to sign. Go's
+	// CheckSignatureFrom refuses a parent that is not a CA with a
+	// bare ConstraintViolationError, so this is checked here where
+	// the refusal can NAME what was wrong.
+	if !ca.BasicConstraintsValid || !ca.IsCA {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate %q is not a certificate authority (it has no CA:true BasicConstraints assertion), so it cannot anchor a trust decision", ca.Subject.String())
+	}
+	if ca.KeyUsage != 0 && ca.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate %q is not permitted to sign certificates, so it cannot anchor a trust decision", ca.Subject.String())
+	}
+	// The CA must have actually signed THIS certificate. Without
+	// this, a CA anchor is a claim rather than a fact.
+	if err := cert.CheckSignatureFrom(ca); err != nil {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate %q did not sign this certificate: %w", ca.Subject.String(), err)
+	}
+	// The CA's own validity window is checked here, and it is a
+	// separate check from the leaf's: a CA that has expired leaves
+	// every leaf it signed untrustworthy, and the operator needs to
+	// be told WHICH one expired.
+	//
+	// The caller's clock, not the wall clock: this function runs on
+	// every voter and again on every replay, so consulting time.Now()
+	// here would let a replay years later reach a different decision
+	// than the original and leave replicas disagreeing about the
+	// store's contents.
+	if now.Before(ca.NotBefore) {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate %q is not yet valid (not before %s, now %s)", ca.Subject.String(), ca.NotBefore.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	}
+	if now.After(ca.NotAfter) {
+		return "", "", fmt.Errorf("hostcert: the issuing CA certificate %q expired (not after %s, now %s)", ca.Subject.String(), ca.NotAfter.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Raw})), Fingerprint(ca.Raw), nil
 }
 
 // Evaluate applies the fail-closed certificate gate and returns what
@@ -354,6 +442,10 @@ func Evaluate(certPEM []byte, opts EvaluateOptions) (Info, error) {
 	// cannot anchor anything, and accepting it would put a trust
 	// anchor in peer-ca.pem that verifies nothing.
 	selfSigned := bytes.Equal(cert.RawIssuer, cert.RawSubject)
+	// caAnchor and caFingerprint are the trust anchor this
+	// certificate is recorded under, and they are empty for a
+	// self-signed certificate, which anchors itself.
+	caAnchor, caFingerprint := "", ""
 	switch {
 	case selfSigned:
 		// CheckSignature, not CheckSignatureFrom: the latter is a CA
@@ -368,6 +460,26 @@ func Evaluate(certPEM []byte, opts EvaluateOptions) (Info, error) {
 		}
 	case opts.AllowCAIssued:
 		if err := checkIssuerIsCA(cert); err != nil {
+			return Info{}, err
+		}
+		// A CA anchor is what makes a CA-issued certificate
+		// TRUSTWORTHY rather than merely tolerated. The CA supplied
+		// is checked against this certificate here - it must be a CA,
+		// it must have signed this certificate, and it must be
+		// inside its own validity window - and it is the CA, not the
+		// leaf, that becomes the recorded trust anchor.
+		//
+		// A CA-issued certificate with NO CA supplied is refused
+		// rather than accepted on the leaf's own say-so. Accepting
+		// it would record a leaf as a trust anchor, which is the pin
+		// list ADR-0185 replaces, and it would do so without
+		// anything ever having checked that the certificate chains
+		// to anything at all.
+		if len(opts.CAAnchorPEM) == 0 {
+			return Info{}, fmt.Errorf("hostcert: certificate is issued by %q but no issuing CA was supplied, so there is no trust anchor to record it under. A CA-issued certificate is recorded under the CA that signed it, not under itself", cert.Issuer.String())
+		}
+		caAnchor, caFingerprint, err = evaluateCAAnchor(cert, opts.CAAnchorPEM, now)
+		if err != nil {
 			return Info{}, err
 		}
 	default:
@@ -408,16 +520,18 @@ func Evaluate(certPEM []byte, opts EvaluateOptions) (Info, error) {
 	}
 
 	return Info{
-		Subject:     cert.Subject.String(),
-		Issuer:      cert.Issuer.String(),
-		NotBefore:   cert.NotBefore,
-		NotAfter:    cert.NotAfter,
-		DNSNames:    append([]string(nil), cert.DNSNames...),
-		IPAddresses: ipStrings(cert.IPAddresses),
-		Fingerprint: Fingerprint(cert.Raw),
-		KeyType:     keyType,
-		KeyBits:     keyBits,
-		Signature:   cert.SignatureAlgorithm.String(),
+		Subject:       cert.Subject.String(),
+		Issuer:        cert.Issuer.String(),
+		NotBefore:     cert.NotBefore,
+		NotAfter:      cert.NotAfter,
+		DNSNames:      append([]string(nil), cert.DNSNames...),
+		IPAddresses:   ipStrings(cert.IPAddresses),
+		Fingerprint:   Fingerprint(cert.Raw),
+		KeyType:       keyType,
+		KeyBits:       keyBits,
+		Signature:     cert.SignatureAlgorithm.String(),
+		CAAnchor:      caAnchor,
+		CAFingerprint: caFingerprint,
 	}, nil
 }
 
@@ -571,4 +685,92 @@ func dedupeStrings(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// IsSelfSigned reports whether a certificate signed itself - which is
+// what a Comb's own certificate did before the Cloudflare/ACME work
+// moved a Colony onto publicly trusted certificates.
+//
+// A self-signed certificate anchors ITSELF: it is its own trust
+// anchor, and needs no issuing CA. That is the distinction ADR-0185's
+// model rests on, and a caller that has to tell the two apart needs
+// it stated rather than inferred.
+func IsSelfSigned(certPEM []byte) (bool, error) {
+	der, err := singleCertificateDER(certPEM)
+	if err != nil {
+		return false, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return false, fmt.Errorf("hostcert: parsing certificate: %w", err)
+	}
+	return bytes.Equal(cert.RawIssuer, cert.RawSubject), nil
+}
+
+// IsCA reports whether a PEM file holds a certificate that is itself a
+// certificate authority, and is therefore a candidate trust anchor
+// rather than a Comb's own serving certificate.
+//
+// It is what lets a reader of a bundle of certificates tell a leaf from
+// the CA that signed it, which is the distinction ADR-0185's model
+// rests on: the store records the CA, and the derived peer-ca.pem
+// holds the CA.
+//
+// A file that holds more than one certificate is refused rather than
+// judged on its first block, because a bundle's shape is an operator's
+// mistake and guessing which block was meant would be a worse one.
+func IsCA(certPEM []byte) (bool, error) {
+	der, err := singleCertificateDER(certPEM)
+	if err != nil {
+		return false, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return false, fmt.Errorf("hostcert: parsing certificate: %w", err)
+	}
+	return cert.BasicConstraintsValid && cert.IsCA, nil
+}
+
+// SigningCA returns the candidate CA certificate that signed the
+// certificate in certPEM, as normalized PEM.
+//
+// It is the search half of ADR-0185: a bundle that holds a Colony's
+// members' leaves and the CA that signed them, and the trust anchor
+// for each leaf is the CA in that bundle that actually signed it.
+//
+// The candidates are tried in the order given, and the FIRST one that
+// signed the certificate wins. The check is a real signature check -
+// CheckSignatureFrom - and not a name comparison, because two CAs can
+// share a name and a name is not an identity.
+//
+// When no candidate signed the certificate, the refusal says so and
+// says how many candidates were tried, because the operator's next
+// step is to collect the CA rather than to guess at a flag.
+func SigningCA(certPEM []byte, candidates [][]byte) ([]byte, error) {
+	der, err := singleCertificateDER(certPEM)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, fmt.Errorf("hostcert: parsing certificate: %w", err)
+	}
+	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+		return nil, fmt.Errorf("hostcert: the certificate is self-signed, so it anchors itself and needs no issuing CA")
+	}
+	for _, candidate := range candidates {
+		caDER, err := singleCertificateDER(candidate)
+		if err != nil {
+			return nil, err
+		}
+		ca, err := x509.ParseCertificate(caDER)
+		if err != nil {
+			return nil, fmt.Errorf("hostcert: parsing the issuing CA certificate: %w", err)
+		}
+		if err := cert.CheckSignatureFrom(ca); err != nil {
+			continue
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Raw}), nil
+	}
+	return nil, fmt.Errorf("hostcert: none of the %d candidate CA certificates signed this certificate, so there is no trust anchor to record it under. The certificate is issued by %q", len(candidates), cert.Issuer.String())
 }

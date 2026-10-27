@@ -640,16 +640,29 @@ func (s *Server) PinPeerCertificate(ctx context.Context, req *rpcpb.PinPeerCerti
 	if peer == nil {
 		return &rpcpb.PinPeerCertificateResponse{Error: "the peer to pin is required"}, nil
 	}
+	// A CA-issued certificate is recorded under the CA that signed
+	// it, and the CA is checked against the certificate here as well
+	// as in the FSM: the CA must be a CA, it must have signed this
+	// certificate, and it must be inside its own validity window.
+	// The FSM checks it again, because the FSM is where a decision
+	// has to be deterministic on every replica.
 	info, err := hostcert.Evaluate([]byte(peer.GetCertPem()), hostcert.EvaluateOptions{
 		Now:                time.Unix(peer.GetPinnedAtUnix(), 0).UTC(),
 		RequireDNSSAN:      true,
 		RequireLoopbackSAN: true,
+		AllowCAIssued:      true,
+		CAAnchorPEM:        []byte(peer.GetCaPem()),
 	})
 	if err != nil {
 		return &rpcpb.PinPeerCertificateResponse{Error: fmt.Sprintf("refusing to pin: %v", err)}, nil
 	}
 	peer.Fingerprint = info.Fingerprint
 	peer.NotAfterUnix = info.NotAfter.Unix()
+	// The CA anchor and its digest are re-derived here too, for the
+	// same reason the leaf's fingerprint is: the caller's own values
+	// are not trusted for the fields that have to be facts.
+	peer.CaPem = info.CAAnchor
+	peer.CaFingerprint = info.CAFingerprint
 	if peer.GetPinnedBy() == "" {
 		peer.PinnedBy = s.localNodeID()
 	}

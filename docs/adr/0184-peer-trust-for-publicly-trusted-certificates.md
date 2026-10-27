@@ -101,7 +101,7 @@ is unchanged, and the existing tests that pin it still pass. A
 CA-issued certificate is dialled by name and is not required to carry
 a loopback address.
 
-### The store still holds the LEAF, and the derived file still verifies the peer
+### The store held the LEAF; ADR-0185 changed it to hold the ISSUING CA
 
 The decision to keep the leaf in the store, rather than recording the
 issuing CA, was checked against Go's own verifier rather than
@@ -119,26 +119,17 @@ So the honest model for a Colony whose members hold public
 certificates is the second: **the store should record the issuing
 CA, not the leaf.**
 
-That is a larger change than this record makes, and it is recorded
-here rather than half-done:
+**ADR-0185 is that change, and it is implemented.** `TrustedPeer`
+gained a `ca_pem` anchor and its digest, `internal/peerca` renders
+the anchor in place of the leaf, and the CA is checked against the
+certificate it anchors at every point the certificate is checked.
 
-- The `TrustedPeer` proto has no field for a CA anchor, and adding
-  one changes replicated state, so it is a schema decision.
-- `internal/peerca` renders the store's certificates verbatim, so it
-  would need to render the CA rather than the leaf.
-- The trust transition (ADR-0170) stages a **certificate** beside the
-  current one, and its overlap semantics are about a Comb's own
-  serving certificate, not about a CA.
+The reason it was not in this record is that it is a schema change to
+replicated state, and it wanted its own record: ADR-0185.
 
-**What this change does is make the store usable at all on such a
+**What this record does is make the store usable at all on such a
 Colony.** It is the difference between "the trust store cannot be
-populated" and "the trust store can be populated, with the leaf
-recorded, and the derived file verifies each Comb's own certificate".
-
-The CA-anchor model is the right end state and is **not done**. This
-record says so plainly, because a record that overstates what is
-built sends the next person looking for something that was never
-built.
+populated" and "the trust store can be populated".
 
 ### What is NOT changed
 
@@ -162,7 +153,7 @@ built.
 - The derived file verifies each Comb's **own** certificate against
   the store. Verifying a peer's certificate that was issued by a
   *different* CA is not supported by this model, and the CA-anchor
-  model that would support it is the open work.
+  model that would support it is ADR-0185.
 
 ## Validation
 

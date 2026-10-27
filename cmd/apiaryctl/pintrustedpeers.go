@@ -113,6 +113,21 @@ type pinTarget struct {
 	certPEM     string
 	fingerprint string
 	notAfter    time.Time
+	// caPEM is the issuing CA's certificate, when the member's
+	// certificate was issued by one rather than signed by itself.
+	// Empty means the member's certificate is self-signed and
+	// anchors itself.
+	//
+	// It is the trust ANCHOR (ADR-0185): the store records it, and
+	// internal/peerca renders it into peer-ca.pem in place of the
+	// leaf, so that every member's leaf verifies against the CA
+	// rather than against a pin list of exact certificates.
+	caPEM string
+	// caFingerprint is the digest of caPEM. It is left empty here
+	// and filled in from the server's answer, because it is
+	// re-derived there rather than believed - exactly as the leaf's
+	// own fingerprint is.
+	caFingerprint string
 }
 
 // where names the file a pinTarget came from, for the refusal that
@@ -194,11 +209,13 @@ func runPinTrustedPeers(args []string) int {
 		peerName    string
 		nodes       repeatedFlag
 		certs       repeatedFlag
+		cas         repeatedFlag
 	)
 	fs.StringVar(&target, "target", "", "host:port of ANY member of this Colony, not only its leader (required)")
 	fs.StringVar(&bundle, "bundle", "", "a PEM file holding every member's serving certificate; each one's identity is read off the certificate itself")
 	fs.Var(&nodes, "node", "a member's raft node_id, for the mode where identity is named rather than derived; repeatable, paired with --cert")
 	fs.Var(&certs, "cert", "the PEM file holding that member's serving certificate; repeatable, paired with --node")
+	fs.Var(&cas, "ca", "the PEM file holding the CA that issued that member's serving certificate; repeatable, paired with the --node at the same position, and omitted for a self-signed certificate")
 	fs.StringVar(&raftdConfig, "raftd-config", "", "path to this Comb's own raftd.json, to read its local copy of the trust store; defaults to the raftd default")
 	fs.StringVar(&peerCA, "peer-ca", "", "PEM file of trust anchors for the --target member's certificate; defaults to "+peerca.DefaultPath+", the file managerd derives from its own copy of the store")
 	fs.StringVar(&peerName, "peer-name", "", "the name to verify the --target member's certificate against; defaults to the host in --target, and is needed only when that is a bare IP or the certificate names something else")
@@ -215,13 +232,26 @@ certificate.
                    name, cross-checked against its SANs. A certificate
                    that does not say which name it is, a name repeated
                    in the bundle, and a file with no certificates in
-                   it are all refusals
+                   it are all refusals. The bundle may also hold the
+                   CERTIFICATE AUTHORITY that signed the members'
+                   certificates: a CA is recognised by the certificate
+                   itself and is used as the trust ANCHOR for the
+                   members it signed, and it is not pinned as a member
+                   of its own
   --node ID        a member's raft node_id, named rather than derived.
                    Repeatable, and every --node needs a --cert and
                    every --cert needs a --node
   --cert FILE      that member's certificate. Same rule, and the
                    certificate's own subject is NOT used as an
                    identity: it is pinned under the --node you named
+  --ca FILE        the CA that issued that member's certificate, when
+                   the certificate was issued by one rather than
+                   signed by itself. Repeatable, and paired with the
+                   --node at the same position. The CA is the trust
+                   ANCHOR the member's certificate is recorded under,
+                   and it is checked against that certificate rather
+                   than believed. A member with a self-signed
+                   certificate needs no --ca
   --target H:P     any member of this Colony, not only its leader
   --peer-ca FILE   trust anchors for the target's certificate. The
                    default is the file managerd derives from this
@@ -232,6 +262,13 @@ certificate.
                    you named yourself and that is missing IS an error
   --peer-name NAME verify the target's certificate against NAME rather
                    than against the host in --target
+
+A member whose certificate was issued by a certificate authority is
+recorded under that CA, not under the certificate itself: the CA is
+the trust anchor, so a peer presenting a renewed certificate still
+verifies. The CA is CHECKED against the certificate it anchors - it
+must be a CA, and it must have signed that certificate - so a wrong
+--ca is a refusal rather than a trust anchor that verifies nothing.
 
 There is no flag for a fingerprint, an expiry, a pinner or a pin time.
 The fingerprint and the expiry are derived from the certificate by
@@ -261,10 +298,10 @@ so run it on a member of the Colony, as root.
 		return 2
 	}
 	switch {
-	case bundle != "" && (len(nodes) > 0 || len(certs) > 0):
-		fmt.Fprintln(os.Stderr, "apiaryctl pin-trusted-peers: --bundle and --node/--cert are two ways of saying the same list, and using both leaves the answer to whichever ran first. Use one.")
+	case bundle != "" && (len(nodes) > 0 || len(certs) > 0 || len(cas) > 0):
+		fmt.Fprintln(os.Stderr, "apiaryctl pin-trusted-peers: --bundle and --node/--cert/--ca are two ways of saying the same list, and using both leaves the answer to whichever ran first. Use one.")
 		return 2
-	case bundle == "" && len(nodes) == 0 && len(certs) == 0:
+	case bundle == "" && len(nodes) == 0 && len(certs) == 0 && len(cas) == 0:
 		fmt.Fprintln(os.Stderr, "apiaryctl pin-trusted-peers: nothing to pin. Pass --bundle FILE for a Colony's whole certificate set, or --node ID --cert FILE for the members you are naming one at a time.")
 		return 2
 	}
@@ -304,6 +341,7 @@ shell on a member of the Colony, or with sudo.
 		Bundle: bundle,
 		Nodes:  nodes,
 		Certs:  certs,
+		CAs:    cas,
 	}, os.Stdout, os.Stderr)
 }
 
@@ -314,6 +352,11 @@ type pinRequest struct {
 	Bundle string
 	Nodes  []string
 	Certs  []string
+	// CAs names the issuing CA certificate for the member at the
+	// same position, when the member's certificate was issued by one
+	// rather than signed by itself. Shorter than Certs is fine: the
+	// members whose certificate is self-signed need no anchor.
+	CAs []string
 }
 
 // pinTrustedPeers is the command, minus flag parsing and the root
@@ -384,7 +427,7 @@ func planPins(req pinRequest) ([]pinTarget, error) {
 	if req.Bundle != "" {
 		return planBundlePins(req.Bundle)
 	}
-	return planExplicitPins(req.Nodes, req.Certs)
+	return planExplicitPins(req.Nodes, req.Certs, req.CAs)
 }
 
 // planBundlePins is bundle mode: identity comes off the certificate.
@@ -404,9 +447,46 @@ func planBundlePins(path string) ([]pinTarget, error) {
 	if len(certs) == 0 {
 		return nil, fmt.Errorf("bundle %s contains no CERTIFICATE blocks. A bundle is every member's certificate in one file; an empty one pins nothing and says so by succeeding, which is the one outcome an operator would not notice", path)
 	}
+	// The bundle may hold CA certificates as well as the members'
+	// leaves. A CA is a trust anchor and a leaf is not, and the two
+	// are told apart by the certificate itself - a CA carries
+	// BasicConstraints CA:true - not by the operator naming them.
+	//
+	// The CA candidates are separated out here so that each leaf can
+	// be recorded under the CA that actually signed it (ADR-0185).
+	caCandidates := make([][]byte, 0, len(certs))
+	for _, c := range certs {
+		isCA, err := hostcert.IsCA(c.pem)
+		if err != nil {
+			return nil, fmt.Errorf("bundle %s: %s: %v", path, c.source, err)
+		}
+		if isCA {
+			caCandidates = append(caCandidates, c.pem)
+		}
+	}
 	targets := make([]pinTarget, 0, len(certs))
 	for i, c := range certs {
-		info, err := hostcert.Evaluate(c.pem, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true, AllowCAIssued: true})
+		// A CA certificate in the bundle is an ANCHOR, not a member.
+		// It is not pinned under a node_id of its own: the store is
+		// keyed on raft identities, and a CA has none.
+		isCA, err := hostcert.IsCA(c.pem)
+		if err != nil {
+			return nil, fmt.Errorf("bundle %s: certificate %d of %d: %v", path, i+1, len(certs), err)
+		}
+		if isCA {
+			continue
+		}
+		// The leaf's trust anchor is the CA that signed it, when it
+		// was issued by one. A self-signed leaf anchors itself.
+		caPEM, err := signingCAFor(c.pem, caCandidates)
+		if err != nil {
+			return nil, fmt.Errorf("bundle %s: certificate %d of %d (%s): %v", path, i+1, len(certs), c.source, err)
+		}
+		info, err := hostcert.Evaluate(c.pem, hostcert.EvaluateOptions{
+			RequireDNSSAN: true, RequireLoopbackSAN: true,
+			AllowCAIssued: true,
+			CAAnchorPEM:   caPEM,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("bundle %s: certificate %d of %d: %v", path, i+1, len(certs), err)
 		}
@@ -419,6 +499,12 @@ func planBundlePins(path string) ([]pinTarget, error) {
 			return nil, fmt.Errorf("bundle %s: certificate %d of %d (%s): %v", path, i+1, len(certs), c.source, err)
 		}
 		targets = append(targets, newPinTarget(nodeID, cn, info, c.pem))
+	}
+	// A bundle holding nothing but CA certificates pins nothing, and
+	// saying so by succeeding is the one outcome an operator would
+	// not notice.
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("bundle %s holds only certificate authorities and no member certificates. A bundle is every member's certificate in one file; a CA is the anchor those certificates are recorded under, not a member", path)
 	}
 	if err := refuseDuplicateNodeIDs(targets, "bundle"); err != nil {
 		return nil, err
@@ -436,7 +522,10 @@ func planBundlePins(path string) ([]pinTarget, error) {
 // flag: a certificate whose subject says "drone" can be pinned under
 // --node brood, and that is the operator's call to make and this
 // command's job to record faithfully.
-func planExplicitPins(nodes, certs []string) ([]pinTarget, error) {
+func planExplicitPins(nodes, certs, cas []string) ([]pinTarget, error) {
+	if len(cas) > len(certs) {
+		return nil, fmt.Errorf("--ca was given %d times and --cert %d times. A --ca names the anchor for one member's certificate; more anchors than certificates is a --ca that matches nothing", len(cas), len(certs))
+	}
 	if len(nodes) != len(certs) {
 		return nil, fmt.Errorf("--node and --cert must be given the same number of times, and they were given %d and %d. Every named member needs its certificate and every certificate needs its member; a pair that is missing one of the two is a member this run would silently skip", len(nodes), len(certs))
 	}
@@ -457,7 +546,27 @@ func planExplicitPins(nodes, certs []string) ([]pinTarget, error) {
 		if err != nil {
 			return nil, fmt.Errorf("--node %s: %s: %w", nodeID, path, err)
 		}
-		info, err := hostcert.Evaluate(pemBytes, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true, AllowCAIssued: true})
+		// The CA anchor for this member, when one was named. It is
+		// checked against the certificate here as well as by
+		// managerd and the FSM: the CA must have signed this
+		// certificate, and a CA that did not is a refusal rather
+		// than an anchor that verifies nothing.
+		var caPEM []byte
+		if i < len(cas) && strings.TrimSpace(cas[i]) != "" {
+			caData, err := os.ReadFile(cas[i])
+			if err != nil {
+				return nil, fmt.Errorf("--node %s: reading its CA certificate %s: %w", nodeID, cas[i], err)
+			}
+			caPEM, err = onePEMCertificate(caData)
+			if err != nil {
+				return nil, fmt.Errorf("--node %s: %s: %w", nodeID, cas[i], err)
+			}
+		}
+		info, err := hostcert.Evaluate(pemBytes, hostcert.EvaluateOptions{
+			RequireDNSSAN: true, RequireLoopbackSAN: true,
+			AllowCAIssued: true,
+			CAAnchorPEM:   caPEM,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("--node %s: %s: %v", nodeID, path, err)
 		}
@@ -500,7 +609,36 @@ func newPinTarget(nodeID, comb string, info hostcert.Info, certPEM []byte) pinTa
 		certPEM:     string(certPEM),
 		fingerprint: info.Fingerprint,
 		notAfter:    info.NotAfter,
+		caPEM:       info.CAAnchor,
 	}
+}
+
+// signingCAFor finds the CA among the bundle's CA certificates that
+// signed the given leaf.
+//
+// It returns nil for a SELF-SIGNED leaf, because such a certificate
+// anchors itself and needs no CA - and a nil CA anchor is how the
+// self-signed path stays exactly as it was.
+//
+// For a CA-issued leaf it returns the CA that signed it, or the
+// refusal that says none of the candidates did. The refusal is a
+// refusal rather than a fallback to "use the leaf anyway", because
+// recording a leaf as its own trust anchor would be the pin list
+// ADR-0185 replaces, and doing it silently would defeat the point.
+func signingCAFor(certPEM []byte, caCandidates [][]byte) ([]byte, error) {
+	// A SELF-SIGNED certificate anchors itself and needs no CA. This
+	// is the shape every entry written before ADR-0185 has, and it
+	// stays exactly as it was.
+	selfSigned, err := hostcert.IsSelfSigned(certPEM)
+	if err != nil {
+		return nil, err
+	}
+	if selfSigned {
+		return nil, nil
+	}
+	// A CA-issued certificate with no CA to anchor it under cannot be
+	// recorded, and saying so names what is missing.
+	return hostcert.SigningCA(certPEM, caCandidates)
 }
 
 // refuseDuplicateNodeIDs is one of the two bundle-mode refusals that
@@ -573,9 +711,15 @@ func alreadyPinned(t pinTarget, existing map[string]*internalpb.TrustedPeer) (pi
 // be in the past, which is a way of pinning an expired certificate.
 func pinOne(ctx context.Context, backend pinBackend, t pinTarget) pinOutcome {
 	resp, refusal, err := backend.Pin(ctx, &rpcpb.TrustedPeer{
-		NodeId:       t.nodeID,
-		CombName:     t.combName,
-		CertPem:      t.certPEM,
+		NodeId:   t.nodeID,
+		CombName: t.combName,
+		CertPem:  t.certPEM,
+		// The issuing CA travels with the pin, and it travels as
+		// the ANCHOR: managerd checks that it signed this
+		// certificate and re-derives its digest, so the value on
+		// the wire is a claim that is verified, not a fact that is
+		// believed.
+		CaPem:        t.caPEM,
 		PinnedAtUnix: time.Now().Unix(),
 		// IsVoter is left false and said to be false in the store's
 		// own doc comment. The FSM refuses a pin that claims
@@ -598,6 +742,10 @@ func pinOne(ctx context.Context, backend pinBackend, t pinTarget) pinOutcome {
 	if resp.GetNotAfterUnix() > 0 {
 		o.target.notAfter = time.Unix(resp.GetNotAfterUnix(), 0).UTC()
 	}
+	// The server's own CA digest, for the same reason the leaf's
+	// fingerprint is the server's own: the operator reads here what
+	// the store is actually holding.
+	o.target.caFingerprint = resp.GetCaFingerprint()
 	return o
 }
 

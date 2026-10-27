@@ -98,8 +98,13 @@ func (f *FSM) applyPinTrustedPeer(index uint64, peer *internalpb.TrustedPeer) *F
 	// is not here and must not be asked for. RequireDNSSAN and
 	// RequireLoopbackSAN are both true because this is a Comb serving
 	// certificate, exactly as they are for a Comb's own.
+	// The certificate is evaluated as of pinned_at_unix, NOT the wall
+	// clock, so that this arm reaches the identical decision on every
+	// voter and on every replay. The CA anchor, when there is one, is
+	// evaluated at the same instant for the same reason.
+	now := time.Unix(peer.GetPinnedAtUnix(), 0).UTC()
 	info, err := hostcert.Evaluate([]byte(peer.GetCertPem()), hostcert.EvaluateOptions{
-		Now:                time.Unix(peer.GetPinnedAtUnix(), 0).UTC(),
+		Now:                now,
 		RequireDNSSAN:      true,
 		RequireLoopbackSAN: true,
 		// A Comb's certificate may be self-signed or issued by a
@@ -110,15 +115,38 @@ func (f *FSM) applyPinTrustedPeer(index uint64, peer *internalpb.TrustedPeer) *F
 		// peer TLS with no anchors at all.
 		//
 		// The gate is still fail-closed. A self-signed certificate
-		// must still verify its own signature, a CA-issued one must
-		// still name an issuer that can anchor trust, and the
-		// fingerprint and expiry are still RE-DERIVED from the
-		// certificate below rather than believed.
+		// must still verify its own signature, and the fingerprint
+		// and expiry are still RE-DERIVED from the certificate below
+		// rather than believed.
 		AllowCAIssued: true,
+		// The CA anchor, when the pin carries one. It is checked
+		// against the certificate - it must be a CA, it must have
+		// signed this certificate, and it must be inside its own
+		// validity window - and it is the CA that becomes the
+		// recorded trust anchor.
+		CAAnchorPEM: []byte(peer.GetCaPem()),
 	})
 	if err != nil {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("PinTrustedPeer: %v", err)}
 	}
+	// The CA's fingerprint is RE-DERIVED here rather than trusted, for
+	// the same reason the leaf's is: the writer is one managerd, and
+	// every other voter applies the same log entry without having
+	// seen the PEM arrive over a socket. A pin that stated a CA
+	// fingerprint which is not the digest of the CA it carries would
+	// be a store that advertises one identity and verifies another.
+	if peer.GetCaPem() != "" && peer.GetCaFingerprint() != info.CAFingerprint {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"PinTrustedPeer: ca_fingerprint %q does not match the digest of the CA certificate supplied (%s); a pin must record what it actually pins",
+			peer.GetCaFingerprint(), info.CAFingerprint)}
+	}
+	// The stored entry carries the CA anchor as it was evaluated, not
+	// as it arrived, so that every replica holds the same bytes for
+	// the same trust anchor. The fingerprint and expiry below are
+	// re-derived for the same reason.
+	stored := proto.Clone(peer).(*internalpb.TrustedPeer)
+	stored.CaPem = info.CAAnchor
+	stored.CaFingerprint = info.CAFingerprint
 	// Re-derived here rather than trusted. A pin whose fingerprint does
 	// not match the certificate it carries would be a store that
 	// advertises one identity and verifies another, which is worse than
@@ -140,7 +168,7 @@ func (f *FSM) applyPinTrustedPeer(index uint64, peer *internalpb.TrustedPeer) *F
 			peer.GetNotAfterUnix(), info.NotAfter.Unix())}
 	}
 
-	f.trustedPeers[peer.GetNodeId()] = proto.Clone(peer).(*internalpb.TrustedPeer)
+	f.trustedPeers[peer.GetNodeId()] = stored
 	return &FSMApplyResult{Index: index, TrustedPeer: f.trustedPeers[peer.GetNodeId()]}
 }
 
