@@ -15,11 +15,17 @@
 
 ![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/apiary)
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
-<!--
-[![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary)](https://github.com/glenjbarber/apiary/releases)
--->
+[![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary?include_prereleases)](https://github.com/glenjbarber/apiary/releases)
 
 [![Book a consultation on Every Expert](https://img.shields.io/badge/Every%20Expert-Book%20a%20consultation-222222?style=for-the-badge)](https://www.everyexpert.com/glenjbarber)
+
+> **Alpha.** Apiary's first public release is `1.0.0-alpha`. It is a
+> working system with its rough edges showing - real bhyve VMs and real
+> jails across a raft-consensus cluster of FreeBSD hosts - and the
+> [release notes](docs/releases/1.0.0-alpha.md) say plainly where it
+> stops. It targets FreeBSD 15. See
+> [`docs/release-process.md`](docs/release-process.md) for the version
+> scheme.
 
 A FreeBSD-native virtualization management platform for cluster
 management, VM and container orchestration, storage replication, and a
