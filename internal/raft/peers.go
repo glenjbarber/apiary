@@ -102,6 +102,19 @@ func (f *FSM) applyPinTrustedPeer(index uint64, peer *internalpb.TrustedPeer) *F
 		Now:                time.Unix(peer.GetPinnedAtUnix(), 0).UTC(),
 		RequireDNSSAN:      true,
 		RequireLoopbackSAN: true,
+		// A Comb's certificate may be self-signed or issued by a
+		// public CA. The Cloudflare/ACME work (ADR-0133) moved a
+		// Colony's Combs onto publicly trusted certificates, and
+		// refusing those here left the trust store permanently empty
+		// on such a Colony - which left peer-ca.pem unwritten and
+		// peer TLS with no anchors at all.
+		//
+		// The gate is still fail-closed. A self-signed certificate
+		// must still verify its own signature, a CA-issued one must
+		// still name an issuer that can anchor trust, and the
+		// fingerprint and expiry are still RE-DERIVED from the
+		// certificate below rather than believed.
+		AllowCAIssued: true,
 	})
 	if err != nil {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("PinTrustedPeer: %v", err)}

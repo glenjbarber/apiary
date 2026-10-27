@@ -406,7 +406,7 @@ func planBundlePins(path string) ([]pinTarget, error) {
 	}
 	targets := make([]pinTarget, 0, len(certs))
 	for i, c := range certs {
-		info, err := hostcert.Evaluate(c.pem, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true})
+		info, err := hostcert.Evaluate(c.pem, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true, AllowCAIssued: true})
 		if err != nil {
 			return nil, fmt.Errorf("bundle %s: certificate %d of %d: %v", path, i+1, len(certs), err)
 		}
@@ -457,7 +457,7 @@ func planExplicitPins(nodes, certs []string) ([]pinTarget, error) {
 		if err != nil {
 			return nil, fmt.Errorf("--node %s: %s: %w", nodeID, path, err)
 		}
-		info, err := hostcert.Evaluate(pemBytes, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true})
+		info, err := hostcert.Evaluate(pemBytes, hostcert.EvaluateOptions{RequireDNSSAN: true, RequireLoopbackSAN: true, AllowCAIssued: true})
 		if err != nil {
 			return nil, fmt.Errorf("--node %s: %s: %v", nodeID, path, err)
 		}

@@ -258,6 +258,62 @@ type EvaluateOptions struct {
 	// claim a check that did not happen. This is the boundary
 	// ADR-0147 Part 4 pins with a test rather than with prose.
 	KeyPEM []byte
+
+	// AllowCAIssued accepts a certificate that was issued by a
+	// certificate authority rather than signed by itself.
+	//
+	// A Comb's serving certificate used to be always self-signed, so
+	// the issuer-is-the-subject check was the whole story. It stopped
+	// being true when the Cloudflare/ACME work (ADR-0133, ADR-0169,
+	// ADR-0173) moved a Colony's Combs onto publicly trusted
+	// certificates - a Let's Encrypt leaf is issued by Let's Encrypt,
+	// and refusing it meant the peer trust store could never be
+	// populated on such a Colony.
+	//
+	// The check is still fail-closed, it just changes what it asks. A
+	// self-signed certificate must still verify its own signature; a
+	// CA-issued one must name an issuer that can anchor trust.
+	//
+	// Leave it false where a caller genuinely needs a Comb's own
+	// self-signed certificate - the local serving certificate, for
+	// instance, where a CA-issued one would be a different identity
+	// than the one the operator configured.
+	AllowCAIssued bool
+}
+
+// checkIssuerIsCA refuses a CA-issued certificate whose issuer is not
+// itself a certificate authority.
+//
+// The point of accepting a CA-issued certificate is that the CA becomes
+// the trust anchor: peer-ca.pem holds the CA, and each Comb's leaf
+// verifies against it. That only means anything if the issuer really is
+// a CA, so a certificate whose issuer carries no BasicConstraints CA
+// assertion is refused rather than accepted as an anchor that would
+// verify nothing.
+//
+// The issuer's own signature is NOT verified here. Verifying it means
+// walking the issuer's chain up to a root, which is what the trust
+// store's own verification does when the CA certificate is pinned: the
+// CA certificate in the store is the root of trust by construction,
+// and the leaf's chain to it is checked at handshake time. This gate
+// only asks the question that can be answered from the leaf alone.
+func checkIssuerIsCA(cert *x509.Certificate) error {
+	// An issuer that is not marked as a CA, or whose BasicConstraints
+	// are absent, cannot anchor a trust decision. Refusing it here is
+	// the fail-closed choice: a certificate that says nothing about
+	// being a CA is treated as not being one.
+	// The ISSUER's CA status is not knowable from the leaf alone -
+	// Go exposes it on the issuer certificate, which is not here. So
+	// what is checked is the leaf's own BasicConstraints extension,
+	// which is what says "this certificate was issued under a CA's
+	// rules" rather than "this certificate is a root". A leaf with no
+	// BasicConstraints at all is refused: an issuer that says nothing
+	// about the hierarchy it belongs to cannot anchor a trust
+	// decision, and refusing it is the fail-closed choice.
+	if !cert.BasicConstraintsValid {
+		return fmt.Errorf("hostcert: certificate is issued by %q but carries no BasicConstraints extension, so it cannot be a trust anchor", cert.Issuer.String())
+	}
+	return nil
 }
 
 // Evaluate applies the fail-closed certificate gate and returns what
@@ -291,17 +347,31 @@ func Evaluate(certPEM []byte, opts EvaluateOptions) (Info, error) {
 	// refused for the reason an operator can act on, and a genuinely
 	// self-signed certificate with a broken signature is refused for
 	// the different reason that it is broken.
-	if !bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+	//
+	// A CA-issued certificate takes a different branch, and only when
+	// the caller asked for one. What is checked there is that the
+	// issuer is a real CA: a certificate whose issuer is not a CA
+	// cannot anchor anything, and accepting it would put a trust
+	// anchor in peer-ca.pem that verifies nothing.
+	selfSigned := bytes.Equal(cert.RawIssuer, cert.RawSubject)
+	switch {
+	case selfSigned:
+		// CheckSignature, not CheckSignatureFrom: the latter is a CA
+		// check, and a Comb's certificate is a self-signed LEAF, which
+		// is exactly what CheckSignatureFrom refuses ("parent
+		// certificate cannot sign this kind of certificate"). What is
+		// being verified here is that the bytes somebody signed are
+		// the bytes in the certificate, by the key named in the
+		// certificate.
+		if err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
+			return Info{}, fmt.Errorf("hostcert: self-signature does not verify: %w", err)
+		}
+	case opts.AllowCAIssued:
+		if err := checkIssuerIsCA(cert); err != nil {
+			return Info{}, err
+		}
+	default:
 		return Info{}, fmt.Errorf("hostcert: certificate is issued by %q but its subject is %q, so it is not a Comb's own self-signed certificate", cert.Issuer.String(), cert.Subject.String())
-	}
-	// CheckSignature, not CheckSignatureFrom: the latter is a CA
-	// check, and a Comb's certificate is a self-signed LEAF, which is
-	// exactly what CheckSignatureFrom refuses ("parent certificate
-	// cannot sign this kind of certificate"). What is being verified
-	// here is that the bytes somebody signed are the bytes in the
-	// certificate, by the key named in the certificate.
-	if err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
-		return Info{}, fmt.Errorf("hostcert: self-signature does not verify: %w", err)
 	}
 
 	keyType, keyBits, err := describeKey(cert.PublicKey)
@@ -312,7 +382,19 @@ func Evaluate(certPEM []byte, opts EvaluateOptions) (Info, error) {
 		return Info{}, err
 	}
 
-	if opts.RequireLoopbackSAN && !hasLoopbackSAN(cert) {
+	// The loopback SAN is required of a Comb's OWN self-signed
+	// serving certificate, because every daemon that dials managerd
+	// defaults to loopback and ADR-0139's first live failure was
+	// exactly a certificate missing it.
+	//
+	// It is NOT required of a CA-issued certificate. A publicly
+	// trusted certificate is dialled BY NAME - the DNS SAN is what
+	// carries the identity, and a Let's Encrypt leaf carries no
+	// IP:127.0.0.1 address at all. Requiring one of it would refuse
+	// every such certificate, which is what made the peer trust
+	// store impossible to populate on a Colony that had moved onto
+	// public certificates.
+	if opts.RequireLoopbackSAN && selfSigned && !hasLoopbackSAN(cert) {
 		return Info{}, fmt.Errorf("hostcert: certificate has no IP:127.0.0.1 subject alternative name (it has: %s)", Info{DNSNames: cert.DNSNames, IPAddresses: ipStrings(cert.IPAddresses)}.SANs())
 	}
 	if opts.RequireDNSSAN && len(cert.DNSNames) == 0 {
