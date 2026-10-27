@@ -5,6 +5,12 @@ inventory and cluster health. It is read-only: it runs the `apiary-mcp`
 connector (see `plugins/apiary-mcp-connector`), which calls five read RPCs on
 ManagerService and nothing else.
 
+This is the Claude Code package. `plugins/apiary-mcp-connector` is the same
+connector packaged for a generic MCP host, and the two are alternatives -
+install one or the other. Both register an MCP server named `apiary`, so
+installing both leaves a host with two servers of the same name. See
+ADR-0178 for why they are kept separate.
+
 ## Setup
 
 1. Build the connector from the repo root and put it on `PATH`:

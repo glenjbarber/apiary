@@ -1,7 +1,6 @@
 {
   "mcpServers": {
     "apiary": {
-      "type": "stdio",
       "command": "apiary-mcp",
       "args": [],
       "env": {
