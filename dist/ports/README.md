@@ -83,8 +83,9 @@ Two mechanisms, and both are needed:
 
   2. **Identical file paths across versions.** Every version installs
      to the *same* paths: `/usr/local/libexec/apiary/raftd` and
-     friends. This is deliberate and it is the reason `CONFLICTS_INSTALL`
-     is load-bearing rather than a nicety. If each version installed
+     friends, and `/usr/local/sbin/apiaryctl`. This is deliberate and
+     it is the reason `CONFLICTS_INSTALL` is load-bearing rather than
+     a nicety. If each version installed
      to a version-specific directory, `pkg` would happily install both
      and the operator would end up with two raftd binaries and no way
      to tell which one the rc.d script runs.
@@ -271,8 +272,9 @@ What was run, and what it showed:
 
 The staged tree is exactly the intended one:
 
+    usr/local/sbin/apiaryctl
     usr/local/libexec/apiary/{raftd,managerd,frontend,restshimd,
-                               apiaryctl,apiaryinstall,apiary-mcp}
+                               apiaryinstall,apiary-mcp}
     usr/local/etc/rc.d/apiary_{raftd,managerd,frontend,restshimd,mcp}
     usr/local/etc/apiary/{README.md,frontend.json.sample,
                            managerd.json.sample,raftd.json.sample,

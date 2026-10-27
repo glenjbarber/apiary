@@ -136,11 +136,18 @@ USES=		go:modules
 RUN_DEPENDS=	dns/dnsmasq:dnsmasq \
 		emulators/qemu:qemu
 
-# Apiary's own binaries live in libexec, not bin: they are daemons and
-# operator tools, not something an operator types by bare name. The
-# rc.d scripts exec /usr/local/libexec/apiary/<name> by absolute path,
-# so this path is load-bearing and must match the PLIST_SUB below.
+# Apiary's DAEMONS live in libexec, not bin: the rc.d scripts exec
+# /usr/local/libexec/apiary/<name> by absolute path, so this path is
+# load-bearing and must match the PLIST_SUB below.
+#
+# apiaryctl is the exception and goes in sbin. It is an OPERATOR
+# command, not a daemon: every subcommand that touches the host needs
+# root, and the two that do not - join-introduce and join-authorize -
+# are the ones an operator runs on a headless Comb with no checkout.
+# $PREFIX/sbin is where a system puts a root-privileged administrative
+# command, on root's PATH. See ADR-0190.
 APIARY_LIBEXECDIR=	${PREFIX}/libexec/apiary
+APIARY_SBINDIR=	${PREFIX}/sbin
 APIARY_CONFDIR=		${PREFIX}/etc/apiary
 APIARY_DATADIR=		/var/db/apiary
 APIARY_LOGDIR=		/var/log/apiary
@@ -200,7 +207,7 @@ GO_TARGET=	./cmd/raftd:${PREFIX}/libexec/apiary/raftd \
 		./cmd/managerd:${PREFIX}/libexec/apiary/managerd \
 		./cmd/frontend:${PREFIX}/libexec/apiary/frontend \
 		./cmd/restshimd:${PREFIX}/libexec/apiary/restshimd \
-		./cmd/apiaryctl:${PREFIX}/libexec/apiary/apiaryctl \
+		./cmd/apiaryctl:${APIARY_SBINDIR}/apiaryctl \
 		./cmd/apiaryinstall:${PREFIX}/libexec/apiary/apiaryinstall \
 		./cmd/apiary-mcp:${PREFIX}/libexec/apiary/apiary-mcp
 

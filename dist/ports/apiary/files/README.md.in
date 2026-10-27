@@ -2,8 +2,10 @@ Apiary has been installed.
 
 WHAT THIS PACKAGE INSTALLED
 
-  /usr/local/libexec/apiary/    the four daemons and the two operator
-                                tools, plus the optional MCP connector
+  /usr/local/sbin/apiaryctl     the operator command line, on root's
+                                PATH
+  /usr/local/libexec/apiary/    the four daemons, the host preflight
+                                tool, and the optional MCP connector
   /usr/local/etc/rc.d/          the five rc.d scripts (none enabled)
   /usr/local/etc/apiary/        four sample configuration files and the
                                 sample README, installed as .sample
@@ -42,7 +44,7 @@ NEXT STEPS
 
   1. Write the configuration:
 
-	/usr/local/libexec/apiary/apiaryctl install
+	/usr/local/sbin/apiaryctl install
 
      Run it with no arguments first to see what it would do. It needs
      a ZFS pool, a VLAN uplink and a bhyve bridge; it will tell you

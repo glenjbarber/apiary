@@ -1,8 +1,8 @@
+sbin/apiaryctl
 libexec/apiary/raftd
 libexec/apiary/managerd
 libexec/apiary/frontend
 libexec/apiary/restshimd
-libexec/apiary/apiaryctl
 libexec/apiary/apiaryinstall
 libexec/apiary/apiary-mcp
 etc/rc.d/apiary_raftd
