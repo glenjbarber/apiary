@@ -4,6 +4,13 @@
 
 Accepted
 
+**Amended by ADR-0188 (2026-10-27).** A restore is a COLONY
+RE-CREATION, not a member rejoin: the restored node gets a NEW Colony
+identity and epoch 1, whatever the archive's payload carried, and
+restoring into a directory that belonged to a Colony is refused. The
+restored state's CONTENTS are preserved as data; its identity is not.
+See ADR-0188 for the reasoning.
+
 ## Context
 
 Apiary had no way to back up or restore its own raft-replicated

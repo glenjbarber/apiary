@@ -54,6 +54,8 @@ Zero is not a valid epoch. There is exactly one way to express "no epoch recorde
 
 The record is inside `FSMSnapshotState`, so it is inside ADR-0143's state digest with no second list to forget - the digest is derived from the message descriptor rather than from a hand-maintained list of sections, so a new state field cannot silently escape it. A raft snapshot restore, or a seeded recovery via `raftd -restore`, therefore cannot drop the epoch.
 
+**ADR-0188 (Stage 3) later changed what a SEEDED recovery does with it.** This record originally recorded that `raftd -restore` carries the epoch through, and the reasoning was that a dropped epoch would leave a node belonging to no generation at all. Stage 3 superseded that: a restore is a COLONY RE-CREATION, not a member rejoin, so the restored node gets a NEW Colony identity and **epoch 1** whatever the payload carried. Carrying the epoch forward would have the restored node present itself to the original members as a member of the same generation - the same identity, a different state, and the split-leader hazard the Colony Protocol exists to prevent. The statement above still holds for a raft SNAPSHOT restore, which is not a re-creation.
+
 ### The increment rules are strict, and they live in the apply function
 
 `AdvanceColonyEpoch` names the epoch it is moving TO, and the apply function enforces three rules:
@@ -161,7 +163,7 @@ The RPC forwards to the leader on a leader-hint rejection, exactly as every othe
 ### What this record does NOT do
 
 - It does NOT wire the increment of the epoch to any OPERATOR ACTION. The command, its rules, and the `AdvanceColonyEpoch` RPC that submits it all exist and work; what does not exist is a flow that reaches for it. See "An advance is an explicit operator action, not an automatic one".
-- It does NOT implement ADR-0156's restore semantics (Stage 3), which is what a reset-that-preserves-identity would hang off.
+- It does NOT implement ADR-0156's restore semantics (Stage 3), which is what a reset-that-preserves-identity would hang off. **ADR-0188 later implemented Stage 3**, and with it the rule that a restore produces a new identity and epoch 1.
 - It does NOT put the epoch on raftd's internal RPC request surface, nor on the roughly seventy peer-forwarded managerd RPCs this stage does not name. See "What is covered, and what is not".
 - It does NOT implement ADR-0156's membership preconditions (Stage 4), divergence detection (Stage 5), or fencing tokens (Stage 6).
 - It does NOT change ADR-0156's other "Decisions for Glen" defaults, each of which remains reversible by amending ADR-0156.

@@ -450,17 +450,25 @@ func TestFSM_JoinRequest_AcceptsAnAbsentEpochOnAColonyWithNoEpoch(t *testing.T) 
 	}
 }
 
-// TestSeedSnapshot_CarriesTheEpoch proves the epoch survives the
+// TestSeedSnapshot_ResetsTheEpoch proves the epoch is RESET by the
 // ADR-0051 restore path - the seeded-recovery route, which is NOT a
 // raft snapshot restore and so is not covered by the snapshot test
 // above.
 //
-// A restore that dropped the epoch would restore a node that believes
-// it belongs to no generation at all, and the refusal of stale-epoch
-// nodes that this record exists to provide would then have nothing to
-// compare against. It would also be a SILENT drop: the restored node
-// would look exactly like a fresh bootstrap.
-func TestSeedSnapshot_CarriesTheEpoch(t *testing.T) {
+// ADR-0182 (Stage 2) originally recorded that a restore CARRIES the
+// epoch, on the reasoning that a dropped epoch would leave a node
+// belonging to no generation at all. ADR-0188 (Stage 3) superseded
+// that: a restore is a COLONY RE-CREATION, not a member rejoin, so
+// the restored node gets a NEW Colony identity and epoch 1 whatever
+// the payload carried.
+//
+// The distinction matters. Carrying the epoch forward would have the
+// restored node present itself to the original members as a member
+// of the same generation - the same identity, a different state, and
+// the split-leader hazard the Colony Protocol exists to prevent. The
+// epoch is what tells those two apart, and it only does so if the
+// restore produces a genuinely new generation.
+func TestSeedSnapshot_ResetsTheEpoch(t *testing.T) {
 	sourceCfg := Config{
 		NodeID:   "source",
 		DataDir:  t.TempDir(),
@@ -509,9 +517,17 @@ func TestSeedSnapshot_CarriesTheEpoch(t *testing.T) {
 	}
 	t.Cleanup(func() { target.Shutdown() })
 
-	eventually(t, 5*time.Second, func() bool { return target.Status().ColonyEpoch == initialColonyEpoch+1 })
+	// The restored node is a NEW Colony, so it starts at epoch 1 -
+	// not at the source's advanced epoch, which is what would make it
+	// look like a member of the original Colony's generation.
+	eventually(t, 5*time.Second, func() bool { return target.Status().ColonyEpoch == initialColonyEpoch })
 
-	if got := target.Status().ColonyEpoch; got != initialColonyEpoch+1 {
-		t.Fatalf("the seeded node's ColonyEpoch = %d, want %d", got, initialColonyEpoch+1)
+	if got := target.Status().ColonyEpoch; got != initialColonyEpoch {
+		t.Fatalf("the seeded node's ColonyEpoch = %d, want %d - a restore is a colony re-creation, not a member rejoin", got, initialColonyEpoch)
+	}
+	// And its identity is new too, so the restored node is not
+	// presented to the original members as one of them.
+	if got := target.Status().ColonyID; got == source.Status().ColonyID {
+		t.Errorf("the seeded node kept the source's Colony identity %q; a restore must produce a new one", got)
 	}
 }
