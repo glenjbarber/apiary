@@ -42,10 +42,6 @@
 #
 # The Makefile passes BUILD_ID/BUILD_TIME through when they are set, so
 # both `make build BUILD_ID=x` and `BUILD_ID=x make build` work.
-#
-# VERSION is overridable the same way, and is the release version the
-# binary will report. See "THE RELEASE VERSION" below for how it
-# defaults and why it is derived from git rather than from the clock.
 set -e
 
 PKG=github.com/glenjbarber/apiary/internal/buildinfo
@@ -53,56 +49,6 @@ PKG=github.com/glenjbarber/apiary/internal/buildinfo
 # Run from the repository root regardless of the caller's directory, so
 # the id describes this checkout and not whatever happens to be above it.
 cd "$(dirname "$0")/.."
-
-# THE RELEASE VERSION
-#
-# A fourth value is stamped: the release version, in buildinfo.Version.
-# It is a human-facing label - "which release is this" - and it is the
-# one field an operator reads to decide whether the binary on a Comb is
-# the one they meant to put there.
-#
-# It was declared and read by buildinfo, and never set by anything, for
-# as long as buildinfo existed. That is not a cosmetic gap: a released
-# binary that cannot say which release it is has no way to be checked
-# against the tag it claims to come from, and versioncheck - which
-# exists to answer exactly "is the running binary the build I
-# installed?" - has nothing to compare.
-#
-# It is stamped HERE rather than in the Makefile, for the same reason
-# the id and the date are: this script is the one place that decides
-# what a build says about itself, so there is one place to look when
-# the answer is wrong.
-#
-# The default is derived from the git tag, when the tree carries one.
-# A build of a tagged commit therefore reports the tag's version, and
-# a build of an untagged commit reports "devel" rather than nothing -
-# because a binary that says nothing is a binary an operator has to
-# guess about.
-#
-# It is NOT derived from the clock, for the same reason the id is not:
-# a value that changed on every build would make two builds of one
-# commit differ, and would break the reproducibility claim that
-# `make check-reproducible` proves. The version is a property of the
-# source, so it is read from the source's own tag.
-#
-# An explicit VERSION wins over the derived one, which is what a
-# release build does:
-#
-#	VERSION=1.0.0-alpha scripts/build-ldflags.sh
-#
-# and the Makefile passes VERSION through on both spellings, like
-# BUILD_ID.
-#
-# WHY NOT THE TAG VERBATIM
-#
-# The tag is "v1.0.0-alpha" and the version is "1.0.0-alpha". The
-# leading "v" is dropped because buildinfo's own comment says the
-# field is a "release or version label" and the repo's convention
-# everywhere else is to write a version without it - the release
-# process document calls the release "1.0.0-alpha" and calls the tag
-# "v1.0.0-alpha". Keeping the "v" in one place and not the other is
-# the kind of small inconsistency that makes a reader wonder whether
-# there are two versions.
 
 # git_usable is the whole reason this script is careful. If the tree is
 # a checkout that git refuses to read - the common case is "dubious
@@ -279,22 +225,8 @@ id=${BUILD_ID:-}
 time=${BUILD_TIME:-}
 [ -n "$time" ] || time=$(git log -1 --format=%cI 2>/dev/null || echo unknown)
 
-version=${VERSION:-}
-if [ -z "$version" ] && [ "$git_readable" -eq 1 ]; then
-	# `git describe --tags --exact-match` prints nothing (and exits
-	# non-zero) when HEAD carries no tag, which is the ordinary case
-	# for a developer's build. The "devel" fallback below covers it.
-	tag=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
-	if [ -n "$tag" ]; then
-		version=${tag#v}
-	else
-		version=devel
-	fi
-fi
-[ -n "$version" ] || version=unknown
-
-case "$id$time$commit$version" in
-*' '*) echo "build-ldflags: values must not contain spaces: [$id] [$time] [$commit] [$version]" >&2; exit 1 ;;
+case "$id$time$commit" in
+*' '*) echo "build-ldflags: values must not contain spaces: [$id] [$time] [$commit]" >&2; exit 1 ;;
 esac
 
 if [ "${1:-}" = "--id" ]; then
@@ -302,12 +234,7 @@ if [ "${1:-}" = "--id" ]; then
 	exit 0
 fi
 
-if [ "${1:-}" = "--version" ]; then
-	echo "$version"
-	exit 0
-fi
-
 # No inner quotes: go splits -ldflags on spaces and honours quotes, and
-# none of these four values can contain a space (checked above).
-printf -- '-X %s.BuildID=%s -X %s.BuildTime=%s -X %s.GitCommit=%s -X %s.Version=%s\n' \
-	"$PKG" "$id" "$PKG" "$time" "$PKG" "$commit" "$PKG" "$version"
+# none of these three values can contain a space (checked above).
+printf -- '-X %s.BuildID=%s -X %s.BuildTime=%s -X %s.GitCommit=%s\n' \
+	"$PKG" "$id" "$PKG" "$time" "$PKG" "$commit"
