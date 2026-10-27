@@ -334,7 +334,10 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   frontend TLS files and `manager_api_key` are configured. This ensures
   managerd API-key authentication is enabled. The caller's bearer key is
   forwarded to managerd for its per-key role check. The setting defaults
-  to `false`.
+  to `false`. The scheme frontend dials restshimd over is read from
+  restshimd's own `restshimd.json` rather than assumed: if restshimd
+  serves HTTPS there (it does whenever its own `tls_cert`/`tls_key` are
+  set), the proxy uses HTTPS and trusts that certificate.
 - `peer_tls` — tri-state, same convention as managerd.json's own
   `peer_tls` above: dial other cluster nodes' managerd over TLS when
   fetching their host stats for the cluster overview page. Omit the key

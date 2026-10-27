@@ -62,6 +62,8 @@ The question is whether a remote caller can reach restshimd through a path on th
 
 `frontend` forwards `/api/v1/*` to `127.0.0.1:8081` on the same host, using `httputil.ReverseProxy` or equivalent. The path prefix is stripped so restshimd sees `/v1/*` unchanged. restshimd keeps its loopback bind, so no change to ADR-0139 or ADR-0147 is needed for restshimd itself.
 
+The scheme the proxy dials is restshimd's own to decide, and is read from restshimd's own config file rather than assumed: `cmd/restshimd` serves HTTPS whenever its config sets `tls_cert`/`tls_key` (the shipped `restshimd.json.sample` sets both), so a proxy that assumed plaintext would fail every request against such an installation with "Client sent an HTTP request to an HTTPS server". This is the same posture ADR-0102 already established for the sibling daemons - managerd reads frontend.json, restshimd.json and raftd.json on the same host because they are co-located and each owns exactly one file - applied to the one file that describes the listener this proxy forwards to. The trust anchor is the certificate named in that config, trusted instead of the system pool, mirroring `internal/tlsdial`'s own rules for reaching a sibling daemon whose certificate this project issued itself.
+
 Only the `/v1/*` routes listed in the implementation's allow-list are forwarded. Any other path under `/api/` returns `404`. This keeps the proxy from exposing future restshimd routes by accident.
 
 ### 2. Bearer-token callers bypass the cookie gate, and only for `/api/v1/`
@@ -114,3 +116,4 @@ These are for the implementer, not decisions:
 - Add the proxy in `internal/frontend`, with the allow-list in one table so it is testable, as ADR-0150 and ADR-0153 do for their route tables.
 - Add a test that every allow-listed route corresponds to an RPC in `requiredRole`.
 - Add a test that a request to `/api/v1/*` without a cookie or bearer header is redirected or refused, and that the `Cookie` header never reaches restshimd.
+- Add a test that the proxy completes a real request against a TLS-serving upstream, so the scheme is decided by restshimd's config rather than assumed.

@@ -255,7 +255,11 @@ func run() error {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
 	if cfg.APIProxyEnabled {
-		srv.SetAPIProxy(frontend.NewAPIProxy())
+		proxy, err := frontend.NewAPIProxy()
+		if err != nil {
+			return fmt.Errorf("creating the restshimd API proxy: %w", err)
+		}
+		srv.SetAPIProxy(proxy)
 	}
 	srv.SetRoleMapStore(roleMapMgr)
 	// The host package page reads each Comb's inventory from that Comb's
