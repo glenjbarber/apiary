@@ -19522,7 +19522,22 @@ type TrustedPeer struct {
 	//
 	// Empty means nothing is staged, which is the shape every entry
 	// before ADR-0170 has.
-	Next          *TrustedPeer `protobuf:"bytes,9,opt,name=next,proto3" json:"next,omitempty"`
+	Next *TrustedPeer `protobuf:"bytes,9,opt,name=next,proto3" json:"next,omitempty"`
+	// ca_pem is the ISSUING CA's certificate, for an entry whose
+	// certificate was issued by a certificate authority rather than
+	// signed by itself (ADR-0185).
+	//
+	// It is the trust ANCHOR, and it is what internal/peerca renders
+	// into peer-ca.pem in place of the leaf. A peer presents a LEAF,
+	// and the anchor that verifies it is the CA that signed it.
+	//
+	// Empty means the entry is a self-signed certificate that anchors
+	// itself - the shape every entry before ADR-0185 has.
+	CaPem string `protobuf:"bytes,10,opt,name=ca_pem,json=caPem,proto3" json:"ca_pem,omitempty"`
+	// ca_fingerprint is the digest of ca_pem, in the same format as
+	// fingerprint above, and re-derived from ca_pem rather than
+	// believed.
+	CaFingerprint string `protobuf:"bytes,11,opt,name=ca_fingerprint,json=caFingerprint,proto3" json:"ca_fingerprint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -19618,6 +19633,20 @@ func (x *TrustedPeer) GetNext() *TrustedPeer {
 		return x.Next
 	}
 	return nil
+}
+
+func (x *TrustedPeer) GetCaPem() string {
+	if x != nil {
+		return x.CaPem
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetCaFingerprint() string {
+	if x != nil {
+		return x.CaFingerprint
+	}
+	return ""
 }
 
 type PinPeerCertificateRequest struct {
@@ -26101,7 +26130,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x11delivered_at_unix\x18\t \x01(\x03R\x0fdeliveredAtUnix\x12\x1f\n" +
 	"\vprepared_by\x18\n" +
 	" \x01(\tR\n" +
-	"preparedBy\"\xb4\x02\n" +
+	"preparedBy\"\xf2\x02\n" +
 	"\vTrustedPeer\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tcomb_name\x18\x02 \x01(\tR\bcombName\x12 \n" +
@@ -26111,7 +26140,10 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0epinned_at_unix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n" +
 	"\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n" +
 	"\bis_voter\x18\b \x01(\bR\aisVoter\x12.\n" +
-	"\x04next\x18\t \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04next\"K\n" +
+	"\x04next\x18\t \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04next\x12\x15\n" +
+	"\x06ca_pem\x18\n" +
+	" \x01(\tR\x05caPem\x12%\n" +
+	"\x0eca_fingerprint\x18\v \x01(\tR\rcaFingerprint\"K\n" +
 	"\x19PinPeerCertificateRequest\x12.\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\"\x83\x01\n" +
 	"\x1aPinPeerCertificateResponse\x12.\n" +

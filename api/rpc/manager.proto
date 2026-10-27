@@ -4686,6 +4686,23 @@ message TrustedPeer {
   // Empty means nothing is staged, which is the shape every entry
   // before ADR-0170 has.
   TrustedPeer next = 9;
+
+  // ca_pem is the ISSUING CA's certificate, for an entry whose
+  // certificate was issued by a certificate authority rather than
+  // signed by itself (ADR-0185).
+  //
+  // It is the trust ANCHOR, and it is what internal/peerca renders
+  // into peer-ca.pem in place of the leaf. A peer presents a LEAF,
+  // and the anchor that verifies it is the CA that signed it.
+  //
+  // Empty means the entry is a self-signed certificate that anchors
+  // itself - the shape every entry before ADR-0185 has.
+  string ca_pem = 10;
+
+  // ca_fingerprint is the digest of ca_pem, in the same format as
+  // fingerprint above, and re-derived from ca_pem rather than
+  // believed.
+  string ca_fingerprint = 11;
 }
 
 message PinPeerCertificateRequest {

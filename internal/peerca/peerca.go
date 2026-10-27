@@ -123,7 +123,27 @@ func Render(peers []*internalpb.TrustedPeer) ([]byte, error) {
 		if pem == "" {
 			return nil, fmt.Errorf("peerca: the pin for node_id %q carries no certificate; the trust store and this file must not disagree", peer.GetNodeId())
 		}
-		writePEM(&buf, pem)
+		// What goes into the file is the TRUST ANCHOR, and for a
+		// CA-issued certificate that is the CA rather than the leaf.
+		//
+		// This is the whole point of ADR-0185. A peer presents a
+		// LEAF; the thing that verifies it is the CA that signed
+		// it. Writing the leaf would make this file a pin list -
+		// one entry per exact certificate - and a peer presenting
+		// a renewed leaf would fail verification against a pool
+		// holding the certificate it used to present. Writing the
+		// CA makes it a trust SET: every leaf the CA signed verifies
+		// against it.
+		//
+		// A self-signed pin has no ca_pem, and anchors itself, so the
+		// leaf is written - which is what crypto/x509 accepts as its
+		// own root, and is the shape every entry written before
+		// ADR-0185 has.
+		anchor := peer.GetCaPem()
+		if anchor == "" {
+			anchor = pem
+		}
+		writePEM(&buf, anchor)
 		// ADR-0170's staged certificate is written ALONGSIDE the
 		// current one, not instead of it.
 		//

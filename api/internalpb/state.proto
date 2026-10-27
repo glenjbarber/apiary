@@ -2032,6 +2032,31 @@ message TrustedPeer {
   // field entirely, so a staged certificate does not break a
   // mixed-version Colony.
   TrustedPeer next = 9;
+
+  // ca_pem is the ISSUING CA's certificate, for an entry whose
+  // certificate was issued by a certificate authority rather than
+  // signed by itself (ADR-0185).
+  //
+  // It is the trust ANCHOR, and it is what internal/peerca renders
+  // into peer-ca.pem in place of the leaf. That is the honest model
+  // for a Colony whose members hold publicly trusted certificates: a
+  // peer presents a LEAF, and the anchor that verifies it is the CA
+  // that signed it. Holding the leaf instead would mean each peer
+  // could only be verified by a pool holding its own exact leaf,
+  // which is a pin list, not a CA.
+  //
+  // Empty means the entry is a self-signed certificate that anchors
+  // itself - the shape every entry written before ADR-0185 has, and
+  // an older replica ignores this field entirely, so a mixed-version
+  // Colony is not broken by it.
+  string ca_pem = 10;
+
+  // ca_fingerprint is the digest of ca_pem, in the same
+  // "SHA256:" + colon-separated uppercase hex format as fingerprint
+  // above, and re-derived from ca_pem by the FSM rather than
+  // believed. It is what an operator compares to decide which CA a
+  // Comb is trusted through.
+  string ca_fingerprint = 11;
 }
 
 // PinTrustedPeer writes one entry into the trust store, and is refused
