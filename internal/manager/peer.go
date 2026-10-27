@@ -914,6 +914,20 @@ func (p *PeerReporter) SetColonyDiskSize(ctx context.Context, addr string, req *
 // VM record and the rename outcome, so returning the leader's real
 // answer (rather than a bare success/failure) is what lets the caller
 // implement the retry contract.
+// AdvanceColonyEpoch forwards ADR-0156 Stage 2's generation advance
+// to addr's own AdvanceColonyEpoch RPC, mirroring SetColonyDiskSize
+// above exactly: a leader-only write, forwarded on a leader-hint
+// rejection, with the whole request travelling so the leader decides
+// against its own authoritative view of the Colony's epoch.
+func (p *PeerReporter) AdvanceColonyEpoch(ctx context.Context, addr string, req *rpcpb.AdvanceColonyEpochRequest) (*rpcpb.AdvanceColonyEpochResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.AdvanceColonyEpoch(ctx, req)
+}
+
 func (p *PeerReporter) RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -1058,9 +1072,13 @@ func (p *PeerReporter) GetJoinRequestStatusUnauthenticatedWithRequest(ctx contex
 		return nil, err
 	}
 	defer conn.Close()
+	// ADR-0156 Stage 2: the caller's own epoch travels with the
+	// forward, so the member holding the join record can refuse a
+	// stale-epoch caller rather than answering it.
 	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{
 		RequestId: req.GetRequestId(), IntroductionCode: req.GetIntroductionCode(),
 		RecipientTlsCertificatePem: req.GetRecipientTlsCertificatePem(),
+		ColonyEpoch:                req.GetColonyEpoch(),
 	})
 }
 
@@ -1390,6 +1408,9 @@ func (p *PeerReporter) CancelJoinRequestUnauthenticated(ctx context.Context, add
 		return nil, err
 	}
 	defer conn.Close()
+	// ADR-0156 Stage 2: the caller's own epoch travels with the
+	// forward, so the member holding the join record can refuse a
+	// stale-epoch caller rather than acting on it.
 	return client.CancelJoinRequest(ctx, req)
 }
 

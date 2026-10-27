@@ -310,6 +310,16 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetColonyDiskSize": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/GetColonyDiskSize": RoleViewer,
 
+	// AdvanceColonyEpoch (ADR-0156 Stage 2) moves the Colony to its
+	// next GENERATION. It is Admin, like every other entry in this
+	// block: it is a state change every member replicates and that
+	// cannot be undone - the epoch only ever advances, and a node
+	// behind the new one is refused admission rather than merely
+	// delayed. Stated here rather than inherited from the map's
+	// fail-closed default, which is the same reasoning as
+	// SetColonyDiskSize above.
+	"/apiary.rpc.v1.ManagerService/AdvanceColonyEpoch": RoleAdmin,
+
 	// PreflightApproveJoinRequest (ADR-0103) previews ApproveJoinRequest's
 	// own reachability gate - Admin-tier, matching ApproveJoinRequest
 	// itself exactly, since it makes managerd dial a caller-selected

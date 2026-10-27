@@ -142,6 +142,7 @@ const (
 	ManagerService_OpenColonyJoinWindow_FullMethodName                = "/apiary.rpc.v1.ManagerService/OpenColonyJoinWindow"
 	ManagerService_CloseColonyJoinWindow_FullMethodName               = "/apiary.rpc.v1.ManagerService/CloseColonyJoinWindow"
 	ManagerService_SetColonyDiskSize_FullMethodName                   = "/apiary.rpc.v1.ManagerService/SetColonyDiskSize"
+	ManagerService_AdvanceColonyEpoch_FullMethodName                  = "/apiary.rpc.v1.ManagerService/AdvanceColonyEpoch"
 	ManagerService_GetColonyDiskSize_FullMethodName                   = "/apiary.rpc.v1.ManagerService/GetColonyDiskSize"
 	ManagerService_GetColonyJoinWindow_FullMethodName                 = "/apiary.rpc.v1.ManagerService/GetColonyJoinWindow"
 	ManagerService_UpdateVoterAddress_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UpdateVoterAddress"
@@ -1091,6 +1092,35 @@ type ManagerServiceClient interface {
 	// override what the operator asked for and leave the log saying
 	// something that did not happen. See internal/raft/colonydisksize.go.
 	SetColonyDiskSize(ctx context.Context, in *SetColonyDiskSizeRequest, opts ...grpc.CallOption) (*SetColonyDiskSizeResponse, error)
+	// AdvanceColonyEpoch moves this Colony to the next GENERATION
+	// (ADR-0156 Stage 2).
+	//
+	// The epoch is the monotonic counter that distinguishes two
+	// generations of the same Colony: a Colony ID says WHICH Colony, and
+	// the epoch says WHICH GENERATION of it. A node restored from a
+	// backup taken before the Colony's last generation change holds a
+	// matching Colony ID and a stale epoch, and only the epoch can see
+	// that.
+	//
+	// The increment rules are enforced in the FSM's apply function, not
+	// in this handler, so every replica decides them identically from
+	// the same committed log: the new epoch must be EXACTLY the current
+	// one plus one, and the Colony must already have an epoch. A jump
+	// of two or more is refused as well as a repeat, because a hole in
+	// the sequence would make the log lie about which generations ever
+	// existed.
+	//
+	// WHO CALLS THIS: ADR-0156 says the epoch is advanced on a
+	// controlled reset of the Colony, or on a full rebuild after the
+	// state is destroyed. This stage provides the command and its rules;
+	// it wires no operator flow to it yet - see ADR-0178's own "An
+	// advance is an explicit operator action, not an automatic one".
+	// A deliberate `raftd -reset` today moves the whole data directory
+	// aside, sidecar included, and the next start forms a genuinely new
+	// Colony with a new identity and epoch 1 - which is Stage 1's
+	// documented behaviour, not a generation change of an existing
+	// Colony.
+	AdvanceColonyEpoch(ctx context.Context, in *AdvanceColonyEpochRequest, opts ...grpc.CallOption) (*AdvanceColonyEpochResponse, error)
 	GetColonyDiskSize(ctx context.Context, in *GetColonyDiskSizeRequest, opts ...grpc.CallOption) (*GetColonyDiskSizeResponse, error)
 	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
 	// pre-join trust anchor in the system. A joining Comb has no Raft
@@ -2394,6 +2424,16 @@ func (c *managerServiceClient) SetColonyDiskSize(ctx context.Context, in *SetCol
 	return out, nil
 }
 
+func (c *managerServiceClient) AdvanceColonyEpoch(ctx context.Context, in *AdvanceColonyEpochRequest, opts ...grpc.CallOption) (*AdvanceColonyEpochResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdvanceColonyEpochResponse)
+	err := c.cc.Invoke(ctx, ManagerService_AdvanceColonyEpoch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetColonyDiskSize(ctx context.Context, in *GetColonyDiskSizeRequest, opts ...grpc.CallOption) (*GetColonyDiskSizeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetColonyDiskSizeResponse)
@@ -3377,6 +3417,35 @@ type ManagerServiceServer interface {
 	// override what the operator asked for and leave the log saying
 	// something that did not happen. See internal/raft/colonydisksize.go.
 	SetColonyDiskSize(context.Context, *SetColonyDiskSizeRequest) (*SetColonyDiskSizeResponse, error)
+	// AdvanceColonyEpoch moves this Colony to the next GENERATION
+	// (ADR-0156 Stage 2).
+	//
+	// The epoch is the monotonic counter that distinguishes two
+	// generations of the same Colony: a Colony ID says WHICH Colony, and
+	// the epoch says WHICH GENERATION of it. A node restored from a
+	// backup taken before the Colony's last generation change holds a
+	// matching Colony ID and a stale epoch, and only the epoch can see
+	// that.
+	//
+	// The increment rules are enforced in the FSM's apply function, not
+	// in this handler, so every replica decides them identically from
+	// the same committed log: the new epoch must be EXACTLY the current
+	// one plus one, and the Colony must already have an epoch. A jump
+	// of two or more is refused as well as a repeat, because a hole in
+	// the sequence would make the log lie about which generations ever
+	// existed.
+	//
+	// WHO CALLS THIS: ADR-0156 says the epoch is advanced on a
+	// controlled reset of the Colony, or on a full rebuild after the
+	// state is destroyed. This stage provides the command and its rules;
+	// it wires no operator flow to it yet - see ADR-0178's own "An
+	// advance is an explicit operator action, not an automatic one".
+	// A deliberate `raftd -reset` today moves the whole data directory
+	// aside, sidecar included, and the next start forms a genuinely new
+	// Colony with a new identity and epoch 1 - which is Stage 1's
+	// documented behaviour, not a generation change of an existing
+	// Colony.
+	AdvanceColonyEpoch(context.Context, *AdvanceColonyEpochRequest) (*AdvanceColonyEpochResponse, error)
 	GetColonyDiskSize(context.Context, *GetColonyDiskSizeRequest) (*GetColonyDiskSizeResponse, error)
 	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
 	// pre-join trust anchor in the system. A joining Comb has no Raft
@@ -3806,6 +3875,9 @@ func (UnimplementedManagerServiceServer) CloseColonyJoinWindow(context.Context, 
 }
 func (UnimplementedManagerServiceServer) SetColonyDiskSize(context.Context, *SetColonyDiskSizeRequest) (*SetColonyDiskSizeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetColonyDiskSize not implemented")
+}
+func (UnimplementedManagerServiceServer) AdvanceColonyEpoch(context.Context, *AdvanceColonyEpochRequest) (*AdvanceColonyEpochResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdvanceColonyEpoch not implemented")
 }
 func (UnimplementedManagerServiceServer) GetColonyDiskSize(context.Context, *GetColonyDiskSizeRequest) (*GetColonyDiskSizeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyDiskSize not implemented")
@@ -6010,6 +6082,24 @@ func _ManagerService_SetColonyDiskSize_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_AdvanceColonyEpoch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdvanceColonyEpochRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).AdvanceColonyEpoch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_AdvanceColonyEpoch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).AdvanceColonyEpoch(ctx, req.(*AdvanceColonyEpochRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetColonyDiskSize_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetColonyDiskSizeRequest)
 	if err := dec(in); err != nil {
@@ -6564,6 +6654,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetColonyDiskSize",
 			Handler:    _ManagerService_SetColonyDiskSize_Handler,
+		},
+		{
+			MethodName: "AdvanceColonyEpoch",
+			Handler:    _ManagerService_AdvanceColonyEpoch_Handler,
 		},
 		{
 			MethodName: "GetColonyDiskSize",
