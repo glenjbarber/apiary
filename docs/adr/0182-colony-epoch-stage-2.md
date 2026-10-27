@@ -1,10 +1,10 @@
-# ADR-0178: Colony epoch, Stage 2 of ADR-0156
+# ADR-0182: Colony epoch, Stage 2 of ADR-0156
 
 Status: Accepted
 Supersedes: None
 Superseded by: None
 Affected projects: Apiary
-Legacy identifier: ADR-0178 (Apiary)
+Legacy identifier: ADR-0182 (Apiary)
 Loreloom identifier: Pending allocation by Glen
 
 ## Status qualifications
@@ -17,7 +17,7 @@ This is the second of ADR-0156's six stages. ADR-0156 is the design document and
 
 ADR-0156's Stages 3 through 6 - sidecar-and-restore semantics, membership preconditions, divergence detection, and fencing tokens - are NOT implemented here. This record does not supersede ADR-0156, and ADR-0156's "Decisions for Glen" defaults that this Stage does not touch remain open.
 
-The number 0178 is the next free apiary-local `docs/adr/` number after ADR-0177. Loreloom allocation is Glen's to do; `docs/adr/MIGRATION.md:31-37` requires central allocation for every shared identifier, so nothing here is padded or offset.
+The number 0182 is the next free apiary-local `docs/adr/` number after ADR-0181. Loreloom allocation is Glen's to do; `docs/adr/MIGRATION.md:31-37` requires central allocation for every shared identifier, so nothing here is padded or offset.
 
 ## Context
 

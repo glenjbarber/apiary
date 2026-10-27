@@ -755,7 +755,7 @@ message Command {
     // ADR-0156 says the command is issued only on a controlled reset
     // or a full rebuild after the state is destroyed. This stage
     // provides the command and its rules; it wires no caller to it
-    // yet - see ADR-0178's own "An advance is an explicit operator
+    // yet - see ADR-0182's own "An advance is an explicit operator
     // action, not an automatic one".
     AdvanceColonyEpoch advance_colony_epoch = 57;
 
