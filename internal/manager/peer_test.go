@@ -704,9 +704,20 @@ func TestPeerReporter_GetVMSerialLog_ReachesSpecificPeer(t *testing.T) {
 	}
 }
 
+// TestPeerReporter_OpenVMConsole_RelaysBytes proves the console
+// tunnel still relays once it is over TLS.
+//
+// It is a TLS test because the console tunnel is REFUSED over
+// plaintext - the stream is the guest's screen and keyboard, and
+// carrying it in cleartext is exactly what the refusal prevents.
 func TestPeerReporter_OpenVMConsole_RelaysBytes(t *testing.T) {
-	addr := newTestPeerServer(t, &fakePeerServer{})
-	p := NewPeerReporter("", false, nil)
+	addr, certPath := newTestPeerServerTLS(t, &fakePeerServer{})
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	p := NewPeerReporter("", true, nil)
+	p.CAPool = pool
 	tunnel, err := p.OpenVMConsole(context.Background(), addr, "vm-1")
 	if err != nil {
 		t.Fatalf("OpenVMConsole() error: %v", err)
