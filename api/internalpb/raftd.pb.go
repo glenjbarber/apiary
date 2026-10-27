@@ -241,7 +241,25 @@ type StatusResponse struct {
 	// not know which Colony I am in" - and is deliberately NOT reported
 	// as an error, because a node that has genuinely not been told yet
 	// is still able to answer every other question on this response.
-	ColonyId      string `protobuf:"bytes,21,opt,name=colony_id,json=colonyId,proto3" json:"colony_id,omitempty"`
+	ColonyId string `protobuf:"bytes,21,opt,name=colony_id,json=colonyId,proto3" json:"colony_id,omitempty"`
+	// colony_epoch (ADR-0156 Stage 2) is this Colony's GENERATION - the
+	// monotonic counter that distinguishes two generations of the same
+	// Colony.
+	//
+	// It is served from the node's REPLICATED state, on exactly the same
+	// terms as the colony_id above: a node answering from its own
+	// configuration would be answering a different question, and a node
+	// restored from an older snapshot WOULD answer differently from the
+	// Colony it is trying to rejoin. That difference is the whole reason
+	// the epoch exists.
+	//
+	// ZERO means this node has no epoch yet: either it has applied no
+	// SetColonyEpoch, or it was restored from a snapshot that predates
+	// ADR-0156 Stage 2. That is a real, reportable state, and is
+	// deliberately NOT reported as an error, for the same reason an
+	// empty colony_id is not: a node that has genuinely not been told
+	// yet can still answer every other question on this response.
+	ColonyEpoch   uint64 `protobuf:"varint,22,opt,name=colony_epoch,json=colonyEpoch,proto3" json:"colony_epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -344,6 +362,13 @@ func (x *StatusResponse) GetColonyId() string {
 		return x.ColonyId
 	}
 	return ""
+}
+
+func (x *StatusResponse) GetColonyEpoch() uint64 {
+	if x != nil {
+		return x.ColonyEpoch
+	}
+	return 0
 }
 
 type ServerInfo struct {
@@ -2712,7 +2737,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\xf2\x02\n" +
+	"\rStatusRequest\"\x95\x03\n" +
 	"\x0eStatusResponse\x12\x1b\n" +
 	"\tis_leader\x18\x01 \x01(\bR\bisLeader\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x17\n" +
@@ -2724,7 +2749,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\x12!\n" +
 	"\fstate_digest\x18\b \x01(\tR\vstateDigest\x12)\n" +
 	"\x10membership_error\x18\x14 \x01(\tR\x0fmembershipError\x12\x1b\n" +
-	"\tcolony_id\x18\x15 \x01(\tR\bcolonyId\"R\n" +
+	"\tcolony_id\x18\x15 \x01(\tR\bcolonyId\x12!\n" +
+	"\fcolony_epoch\x18\x16 \x01(\x04R\vcolonyEpoch\"R\n" +
 	"\n" +
 	"ServerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +

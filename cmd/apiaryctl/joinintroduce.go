@@ -295,7 +295,7 @@ so --field fingerprints prints digests and nothing else.
 // the serving certificate is the one tls_cert_fingerprint has always
 // meant (ADR-0113). The caller guarantees it is non-empty, since
 // localCertificates refuses a Comb with no tls_cert.
-func buildJoinRequest(identity joinIdentity, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
+func buildJoinRequest(identity joinIdentity, firstCode string, fingerprints []string, lastLogIndex uint64, colonyEpoch uint64) *rpcpb.RequestJoinColonyRequest {
 	req := &rpcpb.RequestJoinColonyRequest{
 		NodeId:                 identity.nodeID,
 		RaftBindAddress:        identity.raftBind,
@@ -303,6 +303,21 @@ func buildJoinRequest(identity joinIdentity, firstCode string, fingerprints []st
 		AdvertisedFingerprints: fingerprints,
 		JoinerLogStateObserved: true,
 		JoinerLastLogIndex:     lastLogIndex,
+		// ADR-0156 Stage 2: this Comb's own Colony GENERATION, read
+		// from its own raftd's replicated state and stated on the
+		// request.
+		//
+		// The admission refusal of a stale-epoch node works by
+		// comparing the joiner's claim against the Colony's own
+		// epoch. A joiner that CAN read its own epoch and does not
+		// state it would be opting out of the check for no reason -
+		// and the case that matters most, a joiner restored from a
+		// backup taken before the Colony's last generation change,
+		// is exactly the one that would be opting out.
+		//
+		// Zero means this Comb's raftd has no epoch recorded, which
+		// is the "no claim" value and is accepted unchanged.
+		ColonyEpoch: colonyEpoch,
 	}
 	if len(fingerprints) > 0 {
 		req.TlsCertFingerprint = fingerprints[0]
@@ -374,7 +389,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	// API key yet, by definition, and attaching a local credential to a
 	// target an operator named would send it to whatever address the
 	// operator typed.
-	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, firstCode, fingerprints, local.LastLogIndex))
+	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, firstCode, fingerprints, local.LastLogIndex, local.ColonyEpoch))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1

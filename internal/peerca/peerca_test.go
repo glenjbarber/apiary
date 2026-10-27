@@ -2,10 +2,15 @@ package peerca
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"io/fs"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -426,4 +431,111 @@ func poolContains(t *testing.T, pool *x509.CertPool, certPEM, fingerprint string
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
 	return err == nil
+}
+
+// testCAIssuedCert builds a Comb's certificate and the CA that signed
+// it, in the shape a Colony on a public CA has.
+func testCAIssuedCert(t *testing.T, name string) (leafPEM, caPEM string) {
+	t.Helper()
+	now := time.Now().Truncate(time.Second)
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test Issuing CA"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: name + ".lab3.home.arpa"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(90 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{name + ".lab3.home.arpa"},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+}
+
+// TestRenderPublishesTheCAAnchorRatherThanTheLeaf is the property
+// ADR-0185 decides: what goes into the derived file is the TRUST
+// ANCHOR, and for a CA-issued certificate that is the CA rather than
+// the leaf.
+//
+// The difference is not cosmetic. A file holding leaves is a pin
+// list - it verifies one exact certificate each - and a file holding
+// the CA is a trust set: it verifies every leaf that CA signed.
+func TestRenderPublishesTheCAAnchorRatherThanTheLeaf(t *testing.T) {
+	leafPEM, caPEM := testCAIssuedCert(t, "brood")
+	peer := &internalpb.TrustedPeer{
+		NodeId: "brood.lab3.home.arpa", CombName: "brood",
+		Fingerprint: "SHA256:AA", CertPem: leafPEM, CaPem: caPEM,
+		NotAfterUnix: 1, PinnedAtUnix: 1, PinnedBy: "brood", IsVoter: true,
+	}
+	body, err := Render([]*internalpb.TrustedPeer{peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), caPEM) {
+		t.Error("the rendered file does not carry the CA anchor")
+	}
+	if strings.Contains(string(body), leafPEM) {
+		t.Error("the rendered file carries the leaf; it must carry the CA anchor instead")
+	}
+}
+
+// TestTheRenderedCAAnchorVerifiesTheLeafItSigned is the property that
+// makes the CA the right anchor, checked with Go's own verifier.
+//
+// The file is what a managerd verifies a peer's presented certificate
+// against, so the question is not "does the file contain the CA" but
+// "does a handshake with this file as the root succeed".
+func TestTheRenderedCAAnchorVerifiesTheLeafItSigned(t *testing.T) {
+	leafPEM, caPEM := testCAIssuedCert(t, "brood")
+	peer := &internalpb.TrustedPeer{
+		NodeId: "brood.lab3.home.arpa", CombName: "brood",
+		Fingerprint: "SHA256:AA", CertPem: leafPEM, CaPem: caPEM,
+		NotAfterUnix: 1, PinnedAtUnix: 1, PinnedBy: "brood", IsVoter: true,
+	}
+	body, err := Render([]*internalpb.TrustedPeer{peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(body) {
+		t.Fatal("the rendered file did not parse as certificates")
+	}
+	block, _ := pem.Decode([]byte(leafPEM))
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:     pool,
+		DNSName:   "brood.lab3.home.arpa",
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		t.Fatalf("the rendered file does not verify the leaf it anchors: %v", err)
+	}
 }

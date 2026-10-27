@@ -1,6 +1,6 @@
 # ADR-0154: Reach restshimd through a frontend path prefix
 
-Status: Proposed
+Status: Accepted, implemented
 Supersedes: None
 Superseded by: None
 Affected projects: Apiary
@@ -9,11 +9,35 @@ Loreloom identifier: Pending allocation by Glen
 
 ## Status qualifications
 
-Proposed means the wording has not been approved, and no approval date or approver is recorded here.
-Nothing in this document is implemented.
+Accepted. Implemented in the tree: `internal/frontend/api_proxy.go` holds the
+allow-list and the reverse proxy, `internal/frontend/server.go` gates `/api/`
+behind a bearer header, and `cmd/frontend` refuses to start the proxy without
+TLS and a manager API key. Covered by `internal/frontend/api_proxy_test.go`
+and `cmd/frontend/main_test.go`.
+
 The number 0154 is the next free apiary-local `docs/adr/` number after ADR-0153; Loreloom allocation is Glen's to do.
 Dated 2026-10-18.
 The section "Decisions for Glen" lists the choices this proposal makes by default and that Glen may override before any code is written.
+
+### What the implementation resolved
+
+Decision 3's first option is what shipped: `/api/` accepts a bearer header
+only, never a session cookie, so no CSRF token is needed and the proxy
+strips `Cookie` before forwarding. Decision 1's allow-list is the single
+table in `internal/frontend/api_proxy.go`, and a test asserts every entry maps
+to a ManagerService RPC that carries an explicit role requirement in
+`internal/manager/auth.go` - so an allow-listed route can never silently
+inherit the fail-closed Admin default, and Status remains the deliberate
+auth-exempt exception.
+
+Two of the "Decisions for Glen" items are still open and are noted here
+rather than answered by the code:
+
+- Decision 6 (read-only allow-list first) was NOT taken. The allow-list
+  covers restshimd's VM, jail, cell, network and ISO routes, all of which
+  can write, through managerd's per-RPC role checks.
+- Decision 5 was taken as written: `api_proxy_enabled` defaults to `false`,
+  so a Colony that does not set it sees no change in behaviour.
 
 ## Context
 
@@ -38,13 +62,15 @@ The question is whether a remote caller can reach restshimd through a path on th
 
 `frontend` forwards `/api/v1/*` to `127.0.0.1:8081` on the same host, using `httputil.ReverseProxy` or equivalent. The path prefix is stripped so restshimd sees `/v1/*` unchanged. restshimd keeps its loopback bind, so no change to ADR-0139 or ADR-0147 is needed for restshimd itself.
 
+The scheme the proxy dials is restshimd's own to decide, and is read from restshimd's own config file rather than assumed: `cmd/restshimd` serves HTTPS whenever its config sets `tls_cert`/`tls_key` (the shipped `restshimd.json.sample` sets both), so a proxy that assumed plaintext would fail every request against such an installation with "Client sent an HTTP request to an HTTPS server". This is the same posture ADR-0102 already established for the sibling daemons - managerd reads frontend.json, restshimd.json and raftd.json on the same host because they are co-located and each owns exactly one file - applied to the one file that describes the listener this proxy forwards to. The trust anchor is the certificate named in that config, trusted instead of the system pool, mirroring `internal/tlsdial`'s own rules for reaching a sibling daemon whose certificate this project issued itself.
+
 Only the `/v1/*` routes listed in the implementation's allow-list are forwarded. Any other path under `/api/` returns `404`. This keeps the proxy from exposing future restshimd routes by accident.
 
 ### 2. Bearer-token callers bypass the cookie gate, and only for `/api/v1/`
 
 Browser sessions and bearer keys authenticate differently, and the cookie gate cannot serve a bearer client. For `/api/v1/*` only, `ServeHTTP` accepts a request that carries an `Authorization: Bearer` header and skips the cookie check. The header is forwarded unchanged to restshimd, which forwards it to managerd. Managerd's per-key auth (ADR-0023, role checks in ADR-0030) then decides what the caller can do.
 
-Requests to `/api/v1/*` without a bearer header still get the cookie gate, so a browser session can use the same path.
+A request to `/api/v1/*` without a bearer header is refused with `401`, even when it carries a valid session cookie - see decision 3, whose first option settles this: the cookie gate does not apply on this path at all, because a session cookie is never sufficient here.
 
 The cookie is never forwarded to restshimd. The proxy strips `Cookie` before forwarding.
 
@@ -90,3 +116,4 @@ These are for the implementer, not decisions:
 - Add the proxy in `internal/frontend`, with the allow-list in one table so it is testable, as ADR-0179 and ADR-0160 do for their route tables.
 - Add a test that every allow-listed route corresponds to an RPC in `requiredRole`.
 - Add a test that a request to `/api/v1/*` without a cookie or bearer header is redirected or refused, and that the `Cookie` header never reaches restshimd.
+- Add a test that the proxy completes a real request against a TLS-serving upstream, so the scheme is decided by restshimd's config rather than assumed.

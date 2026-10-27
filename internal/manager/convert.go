@@ -205,6 +205,12 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		// through so the operator reviewing the request can see which
 		// Colony the joiner said it was joining.
 		ColonyId: r.GetColonyId(),
+		// ADR-0156 Stage 2: the Colony GENERATION the joiner
+		// claimed, carried through for the same reason. Zero means the
+		// joiner made no claim, which is deliberately not the same as
+		// a claim of epoch 0 - the audit trail distinguishes "claimed
+		// epoch 1" from "claimed nothing".
+		ColonyEpoch: r.GetColonyEpoch(),
 	}
 }
 
@@ -241,6 +247,11 @@ func toInternalTrustedPeer(p *rpcpb.TrustedPeer) *internalpb.TrustedPeer {
 		PinnedBy:     p.GetPinnedBy(),
 		IsVoter:      p.GetIsVoter(),
 		Next:         toInternalTrustedPeer(p.GetNext()),
+		// The CA anchor and its digest travel with the pin, so a
+		// CA-issued certificate reaches the store recorded under the
+		// CA that signed it.
+		CaPem:         p.GetCaPem(),
+		CaFingerprint: p.GetCaFingerprint(),
 	}
 }
 
@@ -290,6 +301,12 @@ func toRPCTustedPeer(p *internalpb.TrustedPeer) *rpcpb.TrustedPeer {
 		// that no page renders is a staged certificate nobody knows
 		// about.
 		Next: toRPCTustedPeer(p.GetNext()),
+		// The CA anchor is carried onto the wire so an operator can
+		// SEE which CA a Comb is trusted through, and so the trust
+		// page can say so rather than showing a leaf that says
+		// nothing about what verifies it.
+		CaPem:         p.GetCaPem(),
+		CaFingerprint: p.GetCaFingerprint(),
 	}
 }
 

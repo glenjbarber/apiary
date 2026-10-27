@@ -44,6 +44,11 @@ type FSMApplyResult struct {
 	CertificateReservation *internalpb.CertificateReservation
 	ColonyDiskSize         *internalpb.ColonyDiskSize
 	ColonyIdentity         *internalpb.ColonyIdentity
+	// ColonyEpoch is ADR-0156 Stage 2's epoch record. It is carried
+	// alongside ColonyIdentity because the two are the pair the Colony
+	// Protocol's admission decisions compare: the identity says WHICH
+	// Colony, and the epoch says WHICH GENERATION of it.
+	ColonyEpoch *internalpb.ColonyEpoch
 
 	// RenameResult is set only by applyRenameVMIdentity. It carries
 	// BOTH the resulting authoritative VM record and the outcome that
@@ -69,6 +74,18 @@ func (r *FSMApplyResult) GetColonyIdentity() *internalpb.ColonyIdentity {
 		return nil
 	}
 	return r.ColonyIdentity
+}
+
+// GetColonyEpoch returns the Colony epoch this apply produced, or nil
+// if it produced none. A getter rather than a field read for the same
+// reason GetColonyIdentity is one: a refused command carries no
+// value, and a nil field on a struct with an Error set is the common
+// case.
+func (r *FSMApplyResult) GetColonyEpoch() *internalpb.ColonyEpoch {
+	if r == nil {
+		return nil
+	}
+	return r.ColonyEpoch
 }
 
 // FSM applies typed Command messages (see api/internalpb/state.proto)
@@ -124,6 +141,16 @@ type FSM struct {
 	// string. See internal/raft/colonyidentity.go for why it is
 	// replicated rather than configured, and why it is written once.
 	colonyIdentity *internalpb.ColonyIdentity
+
+	// colonyEpoch is ADR-0156 Stage 2's Colony generation counter: the
+	// monotonic value that distinguishes two generations of the same
+	// Colony. nil until the first SetColonyEpoch is applied, which is
+	// the same thing as "no epoch recorded" to every caller - the
+	// ABSENCE of any SetColonyEpoch entry in the log, not a record
+	// holding epoch 0. See internal/raft/colonyepoch.go for why it is
+	// replicated rather than configured, and why the increment rules
+	// live in the apply function.
+	colonyEpoch *internalpb.ColonyEpoch
 
 	// trustedPeers is ADR-0147 Part 4's replicated peer trust store,
 	// keyed by TrustedPeer.node_id. Replicated for the same reason
@@ -328,6 +355,19 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		// decides "written once" from the same committed log rather
 		// than being told - see internal/raft/colonyidentity.go.
 		return f.applySetColonyIdentity(log.Index, op.SetColonyIdentity)
+	case *internalpb.Command_SetColonyEpoch:
+		// ADR-0156 Stage 2. The "already set" refusal and the
+		// fixed-initial-value rule are inside the apply function,
+		// not in any handler, so every replica decides them
+		// identically from the same committed log rather than being
+		// told - see internal/raft/colonyepoch.go.
+		return f.applySetColonyEpoch(log.Index, op.SetColonyEpoch)
+	case *internalpb.Command_AdvanceColonyEpoch:
+		// ADR-0156 Stage 2. The advance-by-exactly-one rule is
+		// inside the apply function, not in any handler, so every
+		// replica decides the same thing from the same committed log -
+		// see internal/raft/colonyepoch.go.
+		return f.applyAdvanceColonyEpoch(log.Index, op.AdvanceColonyEpoch)
 	case *internalpb.Command_RenameVmIdentity:
 		// ADR-0152. The collision, ownership, preservation and
 		// idempotency rules all live inside the apply function, not
@@ -973,6 +1013,41 @@ func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.Pendin
 	}
 	if _, exists := f.pendingJoinRequests[req.GetRequestId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreatePendingJoinRequest: request_id %q already exists", req.GetRequestId())}
+	}
+	// ADR-0156 Stage 2: refuse a join request that names a Colony
+	// GENERATION other than this Colony's own.
+	//
+	// This is the admission refusal ADR-0156's failure matrix calls
+	// for - "Node rejoins with a stale epoch ... Refused: admission of
+	// the stale node" - and it lives HERE, in the apply function, for
+	// the reason the whole file's rules live here: a handler check is
+	// advisory, protects only the path that went through it, and
+	// leaves a follower applying the same log entry to reach a
+	// different answer. The apply function runs in the same order on
+	// every replica, so every replica refuses the same join the same
+	// way.
+	//
+	// A claim BELOW the current epoch is the stale case: a node
+	// restored from a backup taken before the Colony's last
+	// generation change, or one that was partitioned away across it.
+	// A claim ABOVE the current epoch is refused too, and for the
+	// mirror-image reason: a node claiming a generation this Colony
+	// has not reached is not joining this Colony's generation, and
+	// admitting it would put two generations into one log. That is
+	// the same posture Stage 1 took for the Colony ID - a node that
+	// wants a different generation is not joining this one.
+	//
+	// A claim of ZERO is accepted. Every node built before this record
+	// sends no epoch, and refusing those would break every existing
+	// join for no safety gain: a member that makes no claim inherits
+	// the Colony's epoch from the Colony rather than asserting one.
+	// Zero is NOT recorded as a claim of epoch 0 - it is recorded as
+	// the absence of a claim, which is what the replicated record
+	// says it is.
+	if claimed := req.GetColonyEpoch(); claimed != 0 && claimed != f.colonyEpoch.GetEpoch() {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"CreatePendingJoinRequest: refusing to record this join request: the joining node claims Colony epoch %d but this Colony is at epoch %d. A node behind this Colony's generation belongs to an older generation of it and must be rebuilt from the Colony's current state rather than re-admitted, and a node ahead of it is not joining this Colony's generation at all",
+			claimed, f.colonyEpoch.GetEpoch())}
 	}
 	// Bound the state an unauthenticated caller can make every voter keep.
 	// Eviction is decided from the new request's own requested_at_unix (part
@@ -2385,6 +2460,11 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		// it and leave a restored node believing it belongs to no
 		// Colony at all.
 		ColonyIdentity: cloneColonyIdentity(f.colonyIdentity),
+		// ADR-0156 Stage 2: the epoch rides inside FSMSnapshotState
+		// so it is inside the ADR-0143 digest with no second list to
+		// forget, and so a restore cannot silently drop it and leave
+		// a restored node with no generation to be compared against.
+		ColonyEpoch: cloneColonyEpoch(f.colonyEpoch),
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
@@ -2477,6 +2557,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	// absence is the sole representation of "no identity recorded", so
 	// this does not invent one.
 	f.colonyIdentity = cloneColonyIdentity(state.GetColonyIdentity())
+	// ADR-0156 Stage 2. A nil here means the snapshot being restored
+	// predates the epoch, which is the only honest reading: absence is
+	// the sole representation of "no epoch recorded", so this does not
+	// invent one.
+	f.colonyEpoch = cloneColonyEpoch(state.GetColonyEpoch())
 	f.trustedPeers = state.GetTrustedPeers()
 	if f.trustedPeers == nil {
 		f.trustedPeers = make(map[string]*internalpb.TrustedPeer)

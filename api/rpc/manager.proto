@@ -1014,6 +1014,36 @@ service ManagerService {
   // override what the operator asked for and leave the log saying
   // something that did not happen. See internal/raft/colonydisksize.go.
   rpc SetColonyDiskSize(SetColonyDiskSizeRequest) returns (SetColonyDiskSizeResponse);
+
+  // AdvanceColonyEpoch moves this Colony to the next GENERATION
+  // (ADR-0156 Stage 2).
+  //
+  // The epoch is the monotonic counter that distinguishes two
+  // generations of the same Colony: a Colony ID says WHICH Colony, and
+  // the epoch says WHICH GENERATION of it. A node restored from a
+  // backup taken before the Colony's last generation change holds a
+  // matching Colony ID and a stale epoch, and only the epoch can see
+  // that.
+  //
+  // The increment rules are enforced in the FSM's apply function, not
+  // in this handler, so every replica decides them identically from
+  // the same committed log: the new epoch must be EXACTLY the current
+  // one plus one, and the Colony must already have an epoch. A jump
+  // of two or more is refused as well as a repeat, because a hole in
+  // the sequence would make the log lie about which generations ever
+  // existed.
+  //
+  // WHO CALLS THIS: ADR-0156 says the epoch is advanced on a
+  // controlled reset of the Colony, or on a full rebuild after the
+  // state is destroyed. This stage provides the command and its rules;
+  // it wires no operator flow to it yet - see ADR-0182's own "An
+  // advance is an explicit operator action, not an automatic one".
+  // A deliberate `raftd -reset` today moves the whole data directory
+  // aside, sidecar included, and the next start forms a genuinely new
+  // Colony with a new identity and epoch 1 - which is Stage 1's
+  // documented behaviour, not a generation change of an existing
+  // Colony.
+  rpc AdvanceColonyEpoch(AdvanceColonyEpochRequest) returns (AdvanceColonyEpochResponse);
   rpc GetColonyDiskSize(GetColonyDiskSizeRequest) returns (GetColonyDiskSizeResponse);
 
   // GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
@@ -1594,6 +1624,16 @@ message StatusResponse {
   // raft_reachable is false, or when the node has no Colony identity
   // yet - which is a real state, not an error.
   string raft_colony_id = 31;
+
+  // raft_colony_epoch is this Comb's Colony GENERATION, passed through
+  // from raftd's internal Status (ADR-0156 Stage 2). It is the
+  // monotonic counter that distinguishes two generations of the same
+  // Colony.
+  //
+  // Zero means raftd could not be reached (see raft_reachable), or
+  // that this node has no epoch yet - which is a real state, not an
+  // error, and exactly parallel to an empty raft_colony_id above.
+  uint64 raft_colony_epoch = 32;
 }
 
 message AuthenticatePasswordRequest {
@@ -4134,6 +4174,14 @@ message PendingJoinRequest {
   // to belong to. It mirrors internalpb.PendingJoinRequest's own field
   // of the same name - see there for the full reasoning.
   string colony_id = 22;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // joining node claims to belong to. It mirrors
+  // internalpb.PendingJoinRequest's own field of the same name - see
+  // there for the full reasoning, and in particular for why zero
+  // means "the joiner made no claim" rather than "the joiner claimed
+  // epoch 0".
+  uint64 colony_epoch = 23;
 }
 
 message RequestJoinColonyRequest {
@@ -4233,6 +4281,30 @@ message RequestJoinColonyRequest {
   // it was before - the member then inherits the Colony's identity
   // from the Colony rather than asserting one of its own.
   string colony_id = 10;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // JOINING node claims this Colony is at.
+  //
+  // It is the second half of the pair (Colony ID, epoch): the ID says
+  // WHICH Colony, and the epoch says WHICH GENERATION of it. A node
+  // restored from a backup taken before the Colony's last generation
+  // change holds a matching Colony ID and a stale epoch, and only the
+  // epoch can see that.
+  //
+  // A claim BELOW the Colony's current epoch is REFUSED - that is the
+  // stale-epoch node this field exists to turn away at the door. A
+  // claim ABOVE it is refused too, because a node claiming a
+  // generation this Colony has not reached is not joining this
+  // Colony's generation.
+  //
+  // ZERO means the joining node claims no epoch. That is what every
+  // node built before ADR-0156 Stage 2 sends, and it is accepted
+  // exactly as an absent colony_id is: the member then inherits the
+  // Colony's epoch from the Colony rather than asserting one of its
+  // own. The refusal decisions themselves live in the FSM's apply
+  // function, not in a handler, so every replica refuses the same
+  // join the same way.
+  uint64 colony_epoch = 11;
 }
 
 message RequestJoinColonyResponse {
@@ -4291,6 +4363,25 @@ message GetJoinRequestStatusRequest {
   // joiner's certificate, and the seal is what authorizes the
   // collection.
   string prepared_certificate_reservation_id = 5;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // CALLING peer believes this Colony is at. It is stated by the
+  // caller and compared by the callee against its own replicated
+  // epoch, so that a peer which is behind this Colony's generation is
+  // refused rather than allowed to act on it.
+  //
+  // It is stated on the request rather than inferred by the callee,
+  // because the callee can only know what the CALLER believes about
+  // the caller's own generation - which is the whole question. A peer
+  // that was partitioned away across a generation change still
+  // believes it is current, and only a comparison against what the
+  // callee knows can reveal the disagreement.
+  //
+  // ZERO means the caller states no epoch. Every peer built before
+  // ADR-0156 Stage 2 sends none, and those are accepted unchanged -
+  // refusing them would break every existing deployment's inter-node
+  // traffic for no safety gain.
+  uint64 colony_epoch = 6;
 }
 
 message GetJoinRequestStatusResponse {
@@ -4463,6 +4554,25 @@ message ApproveJoinRequestRequest {
   // repository, and something an attacker can satisfy must not be the
   // whole of the gate.
   string second_pin = 5;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // CALLING peer believes this Colony is at. It is stated by the
+  // caller and compared by the callee against its own replicated
+  // epoch, so that a peer which is behind this Colony's generation is
+  // refused rather than allowed to act on it.
+  //
+  // It is stated on the request rather than inferred by the callee,
+  // because the callee can only know what the CALLER believes about
+  // the caller's own generation - which is the whole question. A peer
+  // that was partitioned away across a generation change still
+  // believes it is current, and only a comparison against what the
+  // callee knows can reveal the disagreement.
+  //
+  // ZERO means the caller states no epoch. Every peer built before
+  // ADR-0156 Stage 2 sends none, and those are accepted unchanged -
+  // refusing them would break every existing deployment's inter-node
+  // traffic for no safety gain.
+  uint64 colony_epoch = 9;
 }
 
 message ApproveJoinRequestResponse {
@@ -4576,6 +4686,23 @@ message TrustedPeer {
   // Empty means nothing is staged, which is the shape every entry
   // before ADR-0170 has.
   TrustedPeer next = 9;
+
+  // ca_pem is the ISSUING CA's certificate, for an entry whose
+  // certificate was issued by a certificate authority rather than
+  // signed by itself (ADR-0185).
+  //
+  // It is the trust ANCHOR, and it is what internal/peerca renders
+  // into peer-ca.pem in place of the leaf. A peer presents a LEAF,
+  // and the anchor that verifies it is the CA that signed it.
+  //
+  // Empty means the entry is a self-signed certificate that anchors
+  // itself - the shape every entry before ADR-0185 has.
+  string ca_pem = 10;
+
+  // ca_fingerprint is the digest of ca_pem, in the same format as
+  // fingerprint above, and re-derived from ca_pem rather than
+  // believed.
+  string ca_fingerprint = 11;
 }
 
 message PinPeerCertificateRequest {
@@ -4826,6 +4953,37 @@ message ColonyDiskSize {
   int64 set_at_unix = 4;
 }
 
+// AdvanceColonyEpochRequest asks the Colony to move to its next
+// generation.
+//
+// It carries no target epoch on purpose: the only valid target is the
+// Colony's current epoch plus one, and the FSM's apply function
+// computes that from the committed log rather than being told a number
+// a caller could have got wrong. A request naming a specific epoch
+// would be a second way to express the same decision, and the two
+// could disagree.
+message AdvanceColonyEpochRequest {
+  // timeout_ms bounds how long the leader waits for the command to be
+  // committed. Zero means the server's own default.
+  uint32 timeout_ms = 1;
+}
+
+// AdvanceColonyEpochResponse reports the outcome of an advance.
+message AdvanceColonyEpochResponse {
+  // epoch is the Colony's NEW generation, on success.
+  uint64 epoch = 1;
+
+  // error is set when the advance was refused. The refusal names both
+  // the current epoch and the requested one, so that a caller which
+  // lost a race learns that it lost rather than believing it
+  // succeeded.
+  string error = 2;
+
+  // leader_hint names the current leader when the request was made to
+  // a follower, so the caller can retry there.
+  string leader_hint = 3;
+}
+
 message SetColonyDiskSizeRequest {
   // floor_mb is the requested new floor, in MiB. Must be strictly
   // positive and strictly greater than the floor already in state;
@@ -4900,6 +5058,25 @@ message GetColonyJoinWindowResponse {
 message RejectJoinRequestRequest {
   string request_id = 1;
   uint32 timeout_ms = 2;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // CALLING peer believes this Colony is at. It is stated by the
+  // caller and compared by the callee against its own replicated
+  // epoch, so that a peer which is behind this Colony's generation is
+  // refused rather than allowed to act on it.
+  //
+  // It is stated on the request rather than inferred by the callee,
+  // because the callee can only know what the CALLER believes about
+  // the caller's own generation - which is the whole question. A peer
+  // that was partitioned away across a generation change still
+  // believes it is current, and only a comparison against what the
+  // callee knows can reveal the disagreement.
+  //
+  // ZERO means the caller states no epoch. Every peer built before
+  // ADR-0156 Stage 2 sends none, and those are accepted unchanged -
+  // refusing them would break every existing deployment's inter-node
+  // traffic for no safety gain.
+  uint64 colony_epoch = 3;
 }
 
 message RejectJoinRequestResponse {
@@ -4917,9 +5094,47 @@ message CancelJoinRequestRequest {
   // this is needed: the request being cancelled may live on a remote
   // Colony member's raft, not this node's own.
   string target_address = 3;
+
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // CALLING peer believes this Colony is at. It is stated by the
+  // caller and compared by the callee against its own replicated
+  // epoch, so that a peer which is behind this Colony's generation is
+  // refused rather than allowed to act on it.
+  //
+  // It is stated on the request rather than inferred by the callee,
+  // because the callee can only know what the CALLER believes about
+  // the caller's own generation - which is the whole question. A peer
+  // that was partitioned away across a generation change still
+  // believes it is current, and only a comparison against what the
+  // callee knows can reveal the disagreement.
+  //
+  // ZERO means the caller states no epoch. Every peer built before
+  // ADR-0156 Stage 2 sends none, and those are accepted unchanged -
+  // refusing them would break every existing deployment's inter-node
+  // traffic for no safety gain.
+  uint64 colony_epoch = 4;
 }
 
 message CancelJoinRequestResponse {
+  // colony_epoch (ADR-0156 Stage 2) is the Colony GENERATION the
+  // CALLING peer believes this Colony is at. It is stated by the
+  // caller and compared by the callee against its own replicated
+  // epoch, so that a peer which is behind this Colony's generation is
+  // refused rather than allowed to act on it.
+  //
+  // It is stated on the request rather than inferred by the callee,
+  // because the callee can only know what the CALLER believes about
+  // the caller's own generation - which is the whole question. A peer
+  // that was partitioned away across a generation change still
+  // believes it is current, and only a comparison against what the
+  // callee knows can reveal the disagreement.
+  //
+  // ZERO means the caller states no epoch. Every peer built before
+  // ADR-0156 Stage 2 sends none, and those are accepted unchanged -
+  // refusing them would break every existing deployment's inter-node
+  // traffic for no safety gain.
+  uint64 colony_epoch = 4;
+
   PendingJoinRequest request = 1;
   string error = 2;
   string leader_hint = 3;

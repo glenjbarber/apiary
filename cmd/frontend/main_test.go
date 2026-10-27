@@ -145,6 +145,37 @@ func TestManagerAuthenticator_PreservesExplicitNoLoginMode(t *testing.T) {
 	}
 }
 
+func TestValidateFrontendTransportConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     frontendconfig.Config
+		wantTLS bool
+		wantErr string
+	}{
+		{name: "proxy disabled by default", cfg: frontendconfig.Config{}, wantTLS: false},
+		{name: "proxy requires TLS", cfg: frontendconfig.Config{APIProxyEnabled: true}, wantErr: "api_proxy_enabled requires tls_cert and tls_key"},
+		{name: "TLS pair is required", cfg: frontendconfig.Config{TLSCert: "/cert.pem"}, wantErr: "both tls_cert and tls_key must be set together"},
+		{name: "proxy requires manager API key", cfg: frontendconfig.Config{APIProxyEnabled: true, TLSCert: "/cert.pem", TLSKey: "/key.pem"}, wantErr: "api_proxy_enabled requires manager_api_key"},
+		{name: "proxy enabled with TLS and manager API key", cfg: frontendconfig.Config{APIProxyEnabled: true, TLSCert: "/cert.pem", TLSKey: "/key.pem", ManagerAPIKey: "apk_frontend"}, wantTLS: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotTLS, err := validateFrontendTransportConfig(tc.cfg)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("validateFrontendTransportConfig() error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateFrontendTransportConfig() error: %v", err)
+			}
+			if gotTLS != tc.wantTLS {
+				t.Errorf("TLS enabled = %v, want %v", gotTLS, tc.wantTLS)
+			}
+		})
+	}
+}
+
 // --- manager link startup verification -------------------------------------
 //
 // No live managerd anywhere below: every "managerd" is an in-process gRPC

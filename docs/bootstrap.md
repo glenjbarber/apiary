@@ -727,16 +727,20 @@ secure in general":
   no API key configured yet the header is decorative and the port is
   open to anyone who can reach it.
 - **Loopback is where its clients already are, or can cheaply be.**
-  Reach it remotely through an SSH local forward:
+  Keep `restshimd` bound to loopback. Remote clients can use an SSH local
+  forward:
 
   ```bash
   ssh -L 8081:127.0.0.1:8081 brood.lab3.home.arpa
   ```
 
   then `curl` against `127.0.0.1:8081` locally, with the real API key
-  attached. Only consider a LAN bind for `8081` once `managerd` API
-  keys are genuinely configured and the keys are real credentials -
-  not placeholder text.
+  attached. Alternatively, enable frontend's HTTPS `/api/v1/` proxy by
+  setting `api_proxy_enabled` in `frontend.json`; callers use the same
+  bearer key at `https://<comb>:8080/api/v1/...`, and frontend strips the
+  `/api` prefix before forwarding to loopback restshimd (ADR-0154). The
+  proxy requires frontend TLS and configured managerd API-key
+  authentication. Do not bind restshimd to a LAN address.
 
 Contrast `frontend` on `8080` immediately above: that one is meant to be
 LAN-exposed, because it is the browser UI a human actually uses. Same
@@ -1070,13 +1074,11 @@ repeating this workaround indefinitely.
   is unchanged; it was never the actual fix for the orphan-respawn
   problem, which this `-P` change is.
 - **HAST (`-enable-hast`)** - `apiaryinstall` can check for `hastd_enable`
-  but never configures it. On FreeBSD 15.1-RELEASE or later it reports
-  `ok` once `hastd_enable=YES`, since that release carries the upstream
-  hastd/hastctl fixes this project needed (ADR-0181). On an earlier
-  release it reports `manual` with an upgrade hint, or a reminder that
-  the `hast_proto_recv_hdr` source patch (ADR-0022, FreeBSD bug 298085)
-  is still needed; that patch is never applied automatically. See
-  ADR-0026 for what real setup requires.
+  but never configures it. On FreeBSD 15.1-RELEASE or later, Apiary's
+  supported floor, it reports `ok` once `hastd_enable=YES`, since that
+  release carries the upstream hastd/hastctl fixes this project needed
+  (ADR-0181). On an earlier release it reports `manual` with an upgrade
+  hint. See ADR-0026 for what real setup requires.
 - **`internal_token`/raft transport TLS for a multi-node join** - step 7
   Path B covers the SSH-tunnel mechanics `join` needs across hosts and
   `internal_token`, but TLS between raft members (ADR-0078) is left to

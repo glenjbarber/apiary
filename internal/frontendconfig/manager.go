@@ -59,6 +59,11 @@ type Config struct {
 	TLSCert string `json:"tls_cert,omitempty"`
 	TLSKey  string `json:"tls_key,omitempty"`
 
+	// APIProxyEnabled exposes the allow-listed restshimd API through
+	// frontend's HTTPS listener. It is disabled by default because the
+	// REST API includes write operations.
+	APIProxyEnabled bool `json:"api_proxy_enabled,omitempty"`
+
 	// PeerTLS is tri-state, same convention as nodeconfig.Config.PeerTLS:
 	// nil defaults to ManagerTLS (whether this host's own local managerd
 	// is configured for TLS), since every node dialed here is expected

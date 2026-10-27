@@ -20,7 +20,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -1039,5 +1046,182 @@ func TestPinTrustedPeers_RefusesWithoutRoot(t *testing.T) {
 	}
 	if strings.Contains(out, "peers.pem") && strings.Contains(out, "certificate") {
 		t.Errorf("a non-root run read the certificates before refusing:\n%s", out)
+	}
+}
+
+// ---------------------------------------------------------------------
+// The CA anchor
+// ---------------------------------------------------------------------
+
+// caIssuedCerts issues a certificate authority and two Comb
+// certificates it signed, in the shape a Colony on a public CA has:
+// a DNS SAN of the Comb's name and NO loopback address, because a
+// Let's Encrypt leaf carries none.
+func caIssuedCerts(t *testing.T, dir string, combs ...string) (caPath string, leafPaths map[string]string) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test Issuing CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	caPath = filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	leafPaths = map[string]string{}
+	for i, comb := range combs {
+		leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fqdn := comb + ".lab3.apiary.work"
+		leafTmpl := &x509.Certificate{
+			SerialNumber:          big.NewInt(int64(i) + 2),
+			Subject:               pkix.Name{CommonName: fqdn},
+			NotBefore:             time.Now().Add(-time.Hour),
+			NotAfter:              time.Now().Add(90 * 24 * time.Hour),
+			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			BasicConstraintsValid: true,
+			DNSNames:              []string{fqdn},
+		}
+		leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, comb+".pem")
+		if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		leafPaths[comb] = path
+	}
+	return caPath, leafPaths
+}
+
+// A bundle holding a Colony's CA-issued members' certificates AND the
+// CA that signed them must pin, and each pin must carry the CA as the
+// trust anchor.
+//
+// This is the live case: a Colony whose Combs carry Let's Encrypt
+// certificates could never populate the trust store, because the pin
+// was refused as "not a Comb's own self-signed certificate".
+func TestPinTrustedPeers_ABundleWithACACertificatesPinsThem(t *testing.T) {
+	dir := t.TempDir()
+	caPath, leaves := caIssuedCerts(t, dir, "brood", "drone")
+
+	backend := newCountingBackend()
+	code, _, errOut := runPin(t, backend, pinRequest{Bundle: bundle(t, caPath, leaves["brood"], leaves["drone"])})
+	if code != 0 {
+		t.Fatalf("exit status %d; want 0\n%s", code, errOut)
+	}
+	if len(backend.pins) != 2 {
+		t.Fatalf("submitted %d pins (%v); want 2 - one per member, and the CA is an anchor rather than a member", len(backend.pins), backend.pinnedNodeIDs())
+	}
+	for _, sent := range backend.pins {
+		if sent.GetCaPem() == "" {
+			t.Errorf("pin for %s carries no CA anchor; the store records the CA that signed the certificate", sent.GetNodeId())
+		}
+	}
+}
+
+// The CA in a bundle is an ANCHOR, not a member. The store is keyed on
+// raft identities, and a CA has none, so pinning it under a node_id
+// of its own would be a record of nothing.
+func TestPinTrustedPeers_TheCAInTheBundleIsNotPinnedAsAMember(t *testing.T) {
+	dir := t.TempDir()
+	caPath, leaves := caIssuedCerts(t, dir, "brood")
+
+	backend := newCountingBackend()
+	code, _, errOut := runPin(t, backend, pinRequest{Bundle: bundle(t, caPath, leaves["brood"])})
+	if code != 0 {
+		t.Fatalf("exit status %d; want 0\n%s", code, errOut)
+	}
+	if len(backend.pins) != 1 {
+		t.Fatalf("submitted %d pins (%v); want exactly 1 - the CA is the anchor, not a member", len(backend.pins), backend.pinnedNodeIDs())
+	}
+	if backend.pins[0].GetNodeId() == "" {
+		t.Error("the pin carries no node_id")
+	}
+}
+
+// A bundle holding a CA-issued certificate but NO CA cannot be
+// recorded, and saying so names what is missing. Recording the leaf
+// as its own trust anchor would be the pin list ADR-0185 replaces.
+func TestPinTrustedPeers_ABundleWithNoCAForItsCAIssuedMembersPinsNothing(t *testing.T) {
+	dir := t.TempDir()
+	_, leaves := caIssuedCerts(t, dir, "brood")
+
+	backend := newCountingBackend()
+	code, _, errOut := runPin(t, backend, pinRequest{Bundle: bundle(t, leaves["brood"])})
+	if code == 0 {
+		t.Errorf("exit status 0 on a bundle with no CA for a CA-issued certificate; want a refusal")
+	}
+	if len(backend.pins) != 0 {
+		t.Errorf("sent %d pins; a bundle missing its CA must pin nothing", len(backend.pins))
+	}
+	if !strings.Contains(errOut, "no trust anchor") && !strings.Contains(errOut, "issuing CA") {
+		t.Errorf("refusal does not name what is missing: %s", errOut)
+	}
+}
+
+// The named mode carries the CA as its own flag, and a --ca that did
+// not sign the certificate is refused rather than recorded.
+func TestPinTrustedPeers_NamedModeRefusesACaThatDidNotSignTheCertificate(t *testing.T) {
+	dir := t.TempDir()
+	caPath, leaves := caIssuedCerts(t, dir, "brood")
+	otherCAPath, _ := caIssuedCerts(t, dir, "drone")
+
+	backend := newCountingBackend()
+	code, _, errOut := runPin(t, backend, pinRequest{
+		Nodes: []string{"brood.lab3.apiary.work"},
+		Certs: []string{leaves["brood"]},
+		CAs:   []string{otherCAPath},
+	})
+	if code == 0 {
+		t.Errorf("exit status 0 with a CA that did not sign the certificate; want a refusal")
+	}
+	if len(backend.pins) != 0 {
+		t.Errorf("sent %d pins; a mismatched CA must pin nothing", len(backend.pins))
+	}
+	if !strings.Contains(errOut, "did not sign") {
+		t.Errorf("refusal does not name the mismatch: %s", errOut)
+	}
+	_ = caPath
+}
+
+// The named mode with a --ca that DID sign the certificate pins, and
+// the pin carries the CA.
+func TestPinTrustedPeers_NamedModePinsUnderTheCAGiven(t *testing.T) {
+	dir := t.TempDir()
+	caPath, leaves := caIssuedCerts(t, dir, "brood")
+
+	backend := newCountingBackend()
+	code, _, errOut := runPin(t, backend, pinRequest{
+		Nodes: []string{"brood.lab3.apiary.work"},
+		Certs: []string{leaves["brood"]},
+		CAs:   []string{caPath},
+	})
+	if code != 0 {
+		t.Fatalf("exit status %d; want 0\n%s", code, errOut)
+	}
+	if len(backend.pins) != 1 {
+		t.Fatalf("submitted %d pins; want 1", len(backend.pins))
+	}
+	if backend.pins[0].GetCaPem() == "" {
+		t.Error("the pin carries no CA anchor")
 	}
 }

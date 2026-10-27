@@ -4,6 +4,17 @@
 
 Accepted. Implemented in the tree by PR #173 (merge 93d3420). The acceptance criteria below are met: the dedicated FSM command, the managerd RPC with leader forwarding, the logical/physical identity split, and the reconciler conversion are all implemented and covered by tests. Cluster API PR #5 remains the caller's responsibility - it must still retain the legacy identity on any unresolved migration result, as described under "Cluster API PR #5 coordination" below.
 
+**The call-site conversion is NOT complete.** A follow-up audit of the
+current tree found four physical-resource call sites that still address a
+host resource by the VM's logical id, and therefore miss after a rename:
+the console VNC-port lookup, the serial-log path lookup, the
+node-failure simulation's HAST status query, and the Command Center's
+HAST invariant resource name. They are listed, with the code each one
+touches, under "Residual physical-identity gaps" below. The FSM command
+and the managerd RPC are implemented and tested; these four read paths
+are not yet converted, and they are recorded here rather than left
+implied by the original audit's language.
+
 Supersedes: None
 Superseded by: None
 Tracking issue: #137
@@ -84,9 +95,63 @@ The managerd RPC validates request shape and authorization, submits only the ded
 
 Cluster API PR #5 must not create a replacement VM, switch to a newly generated identity, or treat migration failure as absence. On a collision, ownership mismatch, timeout, leader change, or any other unresolved migration result, it must retain the existing legacy identity and retry or surface a migration error. It may use the UID-scoped identity only after Apiary returns success or the explicit `already_renamed` result for that exact source/destination pair. The provider integration is blocked until this RPC and identity-safe reconciliation are implemented and tested.
 
+## Residual physical-identity gaps
+
+The implementation above converted the reconciler's own paths, but a
+follow-up audit of the current tree found four call sites that still
+address a PHYSICAL host resource by the VM's LOGICAL id. Each of them
+misses after a rename, because the host resource keeps the name it was
+created under - the physical id - while the lookup still asks for the
+logical id.
+
+The pattern is the same in all four: something creates or names a
+resource from the physical id, and something else later looks that
+resource up by the logical id.
+
+| Call site | Physical resource | What it does today |
+|---|---|---|
+| `internal/manager/server.go` - `GetVMConsole` | the bhyve VM's recorded `.vnc` port file | calls `s.vnc.VNCPort(req.GetId())` with the logical id |
+| `internal/manager/server.go` - `GetVMSerialLog` | the bhyve VM's captured serial console file | calls `s.serialLog.SerialLogPath(req.GetId())` with the logical id |
+| `internal/manager/server.go` - `SimulateNodeFailure` | the VM's HAST resource on its owner and replica nodes | builds `OwnedResourcePlacement{ID: vm.GetId()}`, which `hastResourceName` turns into `vm-<logical id>` for the peer status query |
+| `internal/frontend/invariant_hast.go` - `hastResourcesFromVMsJails` | the VM's HAST resource, for the Command Center's HAST invariants | builds `ID: "vm-" + vm.ID`, and `vmView` carries no physical id to build it from |
+
+The bhyve manager derives the `.vnc` and serial-log file names from the
+name it was asked to create the VM under, which the reconciler supplies
+as the physical id (`r.Bhyve.CreateVM(ctx, physicalID, ...)`), and the
+HAST resource name is derived from the physical id as well
+(`vmHASTResourceName(vm.PhysicalID())`). The frontend's `vmView` drops
+`resource_id` entirely, so the HAST invariant path cannot form the
+physical resource name even if it wanted to.
+
+These four are the remaining half of the conversion this ADR originally
+called for. The reconciler's own paths - ZFS datasets, bhyve VM names,
+tap devices, HAST role planning and reclaim, pf anchors, snapshots, and
+stale reclaim - already resolve through `VMPlacement.PhysicalID()`, and
+the manager-side HAST orphan discovery and cleanup already compare
+`vmPhysicalID(vm)`. Nothing here contradicts the "Implemented" status
+of the FSM command and the managerd RPC; it records that the CALL-SITE
+CONVERSION is not yet complete, which is what this ADR's original
+"call-site audit" language required and what the status line has always
+implied by pointing at it.
+
+The fix, when it is made, is the same rule the reconciler already
+follows: resolve the logical id to the physical id at the point of use,
+and carry the physical id (rather than re-deriving it from a logical id
+on the far side of an RPC) wherever the lookup happens on another node.
+
 ## Validation
 
 Required FSM and managerd tests cover successful rename; invalid IDs; missing source; destination collision without mutation; ownership/eligibility mismatch without mutation; idempotent retry; rejection of a non-matching destination as a collision; preservation of every VM definition field; materialization and legacy fallback of `resource_id`; no deletion tombstone, purge, or teardown behavior; snapshot/restore persistence; managerd leader forwarding and returned authoritative result; and reconciliation of bhyve, ZFS, HAST, PF, snapshots, disk paths, and stale reclaim without duplicate provisioning or destruction.
+
+Converting the four residual gaps carries its own required tests: a
+renamed VM's console must still answer with its VNC port; its serial log
+must still be readable; the node-failure simulation must still find the
+renamed VM's HAST resource on its owner and replica; and the Command
+Center's HAST invariants must still report a verdict for it rather than
+an unknown. Each of those needs a case where the logical id differs from
+the physical id, because that is the only state in which the distinction
+is observable - a test that uses a legacy record, where the two ids are
+equal, proves nothing about the conversion.
 
 ## Consequences
 
@@ -95,3 +160,4 @@ Required FSM and managerd tests cover successful rename; invalid IDs; missing so
 - The dedicated FSM command gives all replicas the same collision, ownership, preservation, and idempotency rules.
 - The resource-ID field must be added to both protobuf surfaces and preserved by conversions, updates, snapshots, restore, and managerd responses.
 - Cluster API PR #5 remains blocked until the operation, full call-site conversion, and required tests are implemented. The caller must preserve the legacy identity on every failure.
+- The four residual gaps in "Residual physical-identity gaps" are the remaining part of that full call-site conversion. Each of them is a READ path, so a renamed VM loses access to its console, its serial log, and its HAST status in the Command Center and the node-failure simulation - it does not corrupt or destroy anything. They should be converted on the same rule the reconciler already follows before the rename path is relied on in anger.
