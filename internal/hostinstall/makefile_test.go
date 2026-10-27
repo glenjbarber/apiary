@@ -56,7 +56,7 @@ func TestSetupQuickDelegatesConfigurationToTheInstalledBinary(t *testing.T) {
 	mk := makefileText(t)
 	recipe := target(t, mk, "setup-quick")
 
-	if !strings.Contains(recipe, "/usr/local/libexec/apiary/apiaryctl install --apply") {
+	if !strings.Contains(recipe, "/usr/local/sbin/apiaryctl install --apply") {
 		t.Errorf("setup-quick does not call the installed apiaryctl with --apply:\n%s", recipe)
 	}
 	// It has to run AFTER `make install`, or the binary it is calling is

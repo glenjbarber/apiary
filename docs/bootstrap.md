@@ -57,7 +57,7 @@ no privileges to do that, and the plan names every field it would
 leave alone and why:
 
 ```bash
-/usr/local/libexec/apiary/apiaryctl install
+/usr/local/sbin/apiaryctl install
 ```
 
 A run that refuses anything still does everything else, and exits
@@ -326,6 +326,14 @@ binary to `/usr/local/libexec/apiary/<name>.new` and atomically renames
 it into place - `cp` over a binary a live process still has open fails
 with "Text file busy," but `mv`'s atomic rename doesn't disturb the
 running process's already-open file descriptor at all.
+
+`apiaryctl` is the exception: it is an **operator** command, and it
+goes to `/usr/local/sbin/apiaryctl` rather than alongside the daemons.
+Every `apiaryctl` subcommand that touches the host needs root, and the
+two that do not are the ones an operator runs on a headless Comb with
+no checkout - so it belongs on the administrator's PATH rather than
+hidden in a directory whose name they would have to know (ADR-0136's
+amendment of 2026-10-27).
 
 `apiaryinstall` is installed too (issue #49), to
 `/usr/local/libexec/apiary/apiaryinstall`, the same as the five binaries

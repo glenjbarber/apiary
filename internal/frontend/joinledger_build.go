@@ -115,7 +115,7 @@ func (s *Server) joinLedgerJoiningSteps(view joinLedgerView, request *joinReques
 	step := joinLedgerStep{
 		Comb:   joinLedgerJoiningComb,
 		Action: "Run the introduction command to generate this Comb's first code and read its own certificate fingerprints.",
-		Detail: "/usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT",
+		Detail: "/usr/local/sbin/apiaryctl join-introduce --target HOST:PORT",
 	}
 	switch {
 	case request == nil:
@@ -134,7 +134,7 @@ func (s *Server) joinLedgerJoiningSteps(view joinLedgerView, request *joinReques
 	step = joinLedgerStep{
 		Comb:   joinLedgerJoiningComb,
 		Action: "Read the second PIN that this Colony generated, off the JOINING Comb's own screen.",
-		Detail: "/usr/local/libexec/apiary/apiaryctl join-introduce --request-id ID --first-code CODE --field second-pin",
+		Detail: "/usr/local/sbin/apiaryctl join-introduce --request-id ID --first-code CODE --field second-pin",
 	}
 	switch {
 	case request == nil:
@@ -159,7 +159,7 @@ func (s *Server) joinLedgerJoiningSteps(view joinLedgerView, request *joinReques
 	step = joinLedgerStep{
 		Comb:   joinLedgerJoiningComb,
 		Action: "Install this Comb's own API key and the Colony's restart-guardrail token, once this Colony has approved the request.",
-		Detail: "/usr/local/libexec/apiary/apiaryctl join-introduce --request-id ID --first-code CODE --install-credentials",
+		Detail: "/usr/local/sbin/apiaryctl join-introduce --request-id ID --first-code CODE --install-credentials",
 	}
 	switch {
 	case request == nil:

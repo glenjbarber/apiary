@@ -258,9 +258,15 @@ INSTALL_SRCS=	raftd \
 		managerd \
 		frontend \
 		restshimd \
-		apiaryctl \
 		apiaryinstall \
 		apiary-mcp
+
+# apiaryctl is NOT in INSTALL_SRCS: it is installed to
+# /usr/local/sbin, not to the daemons' libexec directory. The install
+# target handles it separately, and it is listed here so that anything
+# which reads INSTALL_SRCS to decide what a Comb runs still sees the
+# right set.
+INSTALL_SBIN=	apiaryctl
 
 # Every installed binary except apiaryctl and apiaryinstall, because
 # neither has configuration of its own: apiaryctl reads the daemons' own
@@ -285,7 +291,7 @@ INSTALL_SAMPLE_SRCS=	raftd \
 # One of those is a target in this file. The other is not, and is not
 # reachable from here: `apiaryctl force-restart` is a separate installed
 # binary, built by this file and copied by `install` to
-# /usr/local/libexec/apiary/apiaryctl, and then run by name on the Comb.
+# /usr/local/sbin/apiaryctl, and then run by name on the Comb.
 # It was a target here until 2026-09-28 and was removed, because a Comb
 # has no checkout to run a make target from, and an operation performed
 # *because* a Comb is running has to be a file on the Comb (ADR-0136,
@@ -382,12 +388,31 @@ UPDATE_RESTART_SRCS=	frontend \
 # access to the SAN requirements, the bind-versus-dial rule, or
 # restshimd's loopback posture.
 install: build check-stamped setup-dirs
-	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary
+	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary /usr/local/sbin
 	for S in ${INSTALL_SRCS} ; \
 		do cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
 		chmod +x /usr/local/libexec/apiary/$$S.new ;\
 		mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
 	done
+	# apiaryctl goes to $LOCALBASE/sbin, not alongside the daemons.
+	#
+	# It is an OPERATOR tool, and the daemons are not. Every
+	# apiaryctl subcommand that touches the host - install,
+	# force-restart, colony-ca, cert-setup - needs root, and the ones
+	# that do not (join-introduce, join-authorize) are the two an
+	# operator runs on a headless host where the whole point is that
+	# there is no checkout. $LOCALBASE/sbin is where a system puts
+	# exactly that: a root-privileged administrative command, on the
+	# operator's PATH, discoverable without knowing Apiary's
+	# internal directory layout.
+	#
+	# It also means the two halves of the install are distinguishable
+	# by where they live: /usr/local/libexec/apiary is the DAEMONS,
+	# and /usr/local/sbin/apiaryctl is the one command an operator
+	# types.
+	cp -p apiaryctl /usr/local/sbin/apiaryctl.new ;\
+	chmod 755 /usr/local/sbin/apiaryctl.new ;\
+	mv /usr/local/sbin/apiaryctl.new /usr/local/sbin/apiaryctl
 	for S in ${INSTALL_SAMPLE_SRCS} ; \
 		do cp -p etc/apiary/$$S.json.sample /usr/local/etc/apiary/$$S.json.sample ;\
 		chmod 644 /usr/local/etc/apiary/$$S.json.sample ;\
@@ -613,7 +638,7 @@ NODE_REST_ADDR?=	127.0.0.1:8081
 # To see what an install would do before it does it, run it with no
 # --apply. It needs no privileges to do that:
 #
-#	/usr/local/libexec/apiary/apiaryctl install
+#	/usr/local/sbin/apiaryctl install
 setup-quick:
 	pkg install -y go git
 	${MAKE} build
@@ -623,7 +648,7 @@ setup-quick:
 	${MAKE} install
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
-	/usr/local/libexec/apiary/apiaryctl install --apply \
+	/usr/local/sbin/apiaryctl install --apply \
 		--zfs-base "${NODE_ZFS_POOL}/apiary" \
 		--vlan-uplink "${NODE_VLAN_UPLINK}" \
 		--bhyve-bridge "${NODE_BHYVE_BRIDGE}" \

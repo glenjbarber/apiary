@@ -57,7 +57,7 @@ func runJoinAuthorize(args []string) int {
 	fs.StringVar(&raftdConfig, "raftd-config", "", "path to raftd.json, to find the local raftd socket; defaults to "+raftdconfig.DefaultPath)
 	fs.DurationVar(&expiresIn, "expires-in", joinauth.DefaultTTL, "how long the new entry lasts; entries are single-use, so this is a ceiling on an operator forgetting one")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl join-authorize --node-id ID --fingerprint FP [--request-id ID]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/sbin/apiaryctl join-authorize --node-id ID --fingerprint FP [--request-id ID]
 
 Creates ONE single-use entry in this Colony's root-owned authorization
 store, authorizing a named Comb to join. It prints the pending join
@@ -71,7 +71,7 @@ leader, run this on the leader as well - an entry on a follower is an
 entry no approval will ever consult.
 
 Root only, and needs no checkout: this is the installed binary at
-/usr/local/libexec/apiary/apiaryctl.
+/usr/local/sbin/apiaryctl.
 
 Exit status is 0 only when an entry was written. Every refusal exits
 non-zero and writes nothing.

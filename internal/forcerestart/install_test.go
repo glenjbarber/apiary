@@ -124,24 +124,44 @@ func TestMakefile_BuildsApiaryctl(t *testing.T) {
 	}
 }
 
+// TestMakefile_InstallsApiaryctl pins WHERE apiaryctl lands, which is
+// $LOCALBASE/sbin and not the daemons' libexec directory.
+//
+// It is an OPERATOR tool, and the daemons are not: every apiaryctl
+// subcommand that touches the host needs root, and the ones that do
+// not are the two an operator runs on a headless host with no
+// checkout. $LOCALBASE/sbin is where a system puts exactly that - a
+// root-privileged administrative command, on the operator's PATH,
+// without the operator having to know Apiary's internal layout.
+//
+// The test is on the INSTALL, not on a variable: a variable that is
+// defined correctly and then not the one the recipe uses is the same
+// defect wearing a disguise.
 func TestMakefile_InstallsApiaryctl(t *testing.T) {
-	install := makeVar(t, readMakefile(t), "INSTALL_SRCS")
-	if !contains(install, "apiaryctl") {
-		t.Errorf("INSTALL_SRCS = %v, want it to include apiaryctl.\n"+
-			"Without it `make install` leaves no apiaryctl on the node, and the one command "+
-			"an operator can run on a Comb with no source checkout stops existing there - "+
-			"with no error anywhere.", install)
+	makefile := readMakefile(t)
+
+	// It must be installed to sbin.
+	if !strings.Contains(makefile, "/usr/local/sbin/apiaryctl") {
+		t.Error("the install rule does not install apiaryctl to /usr/local/sbin; " +
+			"an operator on a headless Comb would have to know Apiary's internal " +
+			"directory layout to find the one command they can run")
 	}
 
-	// And the install rule has to actually loop over the whole list. A
-	// variable that is defined correctly and then not the one the recipe
-	// iterates is the same defect wearing a disguise, and it is the
-	// shape the sample-config loop already took when apiaryctl arrived
-	// with no .json.sample of its own.
-	makefile := readMakefile(t)
+	// And it must NOT still be in the daemons' list, or it would be
+	// installed twice - once in each place - and the two copies would
+	// drift.
+	install := makeVar(t, makefile, "INSTALL_SRCS")
+	if contains(install, "apiaryctl") {
+		t.Errorf("INSTALL_SRCS = %v, want it NOT to include apiaryctl.\n"+
+			"It is installed to /usr/local/sbin now, and being in this list too would "+
+			"put two copies on the host that drift apart.", install)
+	}
+
+	// The binary install rule has to still iterate the whole list, or
+	// the daemons would not be copied at all.
 	if !strings.Contains(makefile, "for S in ${INSTALL_SRCS} ; \\") {
 		t.Error("the binary install rule no longer iterates ${INSTALL_SRCS}; " +
-			"apiaryctl would be listed and never copied")
+			"the daemons would be listed and never copied")
 	}
 }
 
@@ -261,7 +281,7 @@ func TestMakefile_HasNoForceRestartTarget(t *testing.T) {
 		if m := regexp.MustCompile("(?m)" + forbidden).FindString(makefile); m != "" {
 			t.Errorf("the Makefile still has %q at the start of a line.\n"+
 				"force-restart is an operation on a running Comb, so it is the installed "+
-				"apiaryctl at /usr/local/libexec/apiary/apiaryctl. A make target runs only "+
+				"apiaryctl at /usr/local/sbin/apiaryctl. A make target runs only "+
 				"where there is a checkout, and a Comb has none, so the target is a name "+
 				"that reads like an option and cannot be typed where it is needed. See "+
 				"ADR-0136 and ADR-0141.", m)

@@ -1,6 +1,6 @@
 // Command apiaryctl is the operator-facing command line for a Comb.
 //
-// It is a separate installed binary at /usr/local/libexec/apiary/apiaryctl
+// It is a separate installed binary at /usr/local/sbin/apiaryctl
 // rather than something reached through a checkout, and that is the
 // whole reason it exists. A Combs' source tree was never there to be
 // relied on - the Combs are not development machines, which is exactly
@@ -38,17 +38,17 @@
 // Usage (apiaryctl is not on PATH; always invoke it by its installed
 // path):
 //
-//	/usr/local/libexec/apiary/apiaryctl install [--apply]
-//	/usr/local/libexec/apiary/apiaryctl join-authorize --node-id ID --fingerprint FP
-//	/usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT
-//	/usr/local/libexec/apiary/apiaryctl force-restart
-//	/usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
-//	/usr/local/libexec/apiary/apiaryctl restart-guardrail-provision
-//	/usr/local/libexec/apiary/apiaryctl migrate-tls-dir [--apply]
-//	/usr/local/libexec/apiary/apiaryctl colony-ca init [--dir DIR]
-//	/usr/local/libexec/apiary/apiaryctl colony-ca issue-raft --name HOST [--ip IP]...
-//	/usr/local/libexec/apiary/apiaryctl cert-setup [setup|prepare|status]
-//	/usr/local/libexec/apiary/apiaryctl help
+//	/usr/local/sbin/apiaryctl install [--apply]
+//	/usr/local/sbin/apiaryctl join-authorize --node-id ID --fingerprint FP
+//	/usr/local/sbin/apiaryctl join-introduce --target HOST:PORT
+//	/usr/local/sbin/apiaryctl force-restart
+//	/usr/local/sbin/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
+//	/usr/local/sbin/apiaryctl restart-guardrail-provision
+//	/usr/local/sbin/apiaryctl migrate-tls-dir [--apply]
+//	/usr/local/sbin/apiaryctl colony-ca init [--dir DIR]
+//	/usr/local/sbin/apiaryctl colony-ca issue-raft --name HOST [--ip IP]...
+//	/usr/local/sbin/apiaryctl cert-setup [setup|prepare|status]
+//	/usr/local/sbin/apiaryctl help
 package main
 
 import (
@@ -61,9 +61,10 @@ import (
 
 const usage = `apiaryctl - operator commands for an apiary Comb.
 
-apiaryctl is installed at /usr/local/libexec/apiary/apiaryctl and is
-NOT on PATH. Invoke it by that full path, e.g.
-/usr/local/libexec/apiary/apiaryctl help.
+apiaryctl is installed at /usr/local/sbin/apiaryctl, which is on
+root's PATH. The subcommands that touch the host need root anyway;
+the ones that do not - join-introduce and join-authorize - are the
+two an operator runs on a headless Comb.
 
 Usage:
   apiaryctl install          generate this Comb's configuration, TLS

@@ -165,7 +165,7 @@ func readLocalCertificate(label, path string) (*localCertificate, error) {
 func localCertificates(configPath string) ([]*localCertificate, error) {
 	cfg, err := (&nodeconfig.Manager{Path: configPath}).Load()
 	if err != nil {
-		return nil, fmt.Errorf("reading this Comb's own configuration: %w - run `/usr/local/libexec/apiary/apiaryctl install --apply` first", err)
+		return nil, fmt.Errorf("reading this Comb's own configuration: %w - run `/usr/local/sbin/apiaryctl install --apply` first", err)
 	}
 	serving, err := readLocalCertificate("tls_cert", cfg.TLSCert)
 	if err != nil {
@@ -222,8 +222,8 @@ func runJoinIntroduce(args []string) int {
 	fs.StringVar(&caFile, "ca-file", "", "trust this CA file instead of the system pool when dialing --target with TLS; ignored with --plaintext")
 	fs.BoolVar(&installCredentials, "install-credentials", false, "after approval, decrypt and install this Comb's per-node API key and Colony restart-guardrail token (root only; TLS required)")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT [--field FIELD]
-       /usr/local/libexec/apiary/apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/sbin/apiaryctl join-introduce --target HOST:PORT [--field FIELD]
+       /usr/local/sbin/apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
 
 Start or poll a two-way Colony join (ADR-0147 Part 2). This command PRINTS
 and never submits anything to the target on your behalf: the target's Admin
@@ -424,7 +424,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	fmt.Println("This command will not submit any of that for you. The transcription is")
 	fmt.Println("the check.")
 	fmt.Printf("\nWhen the target's Admin has verified it, poll for the second PIN:\n\n")
-	fmt.Printf("  /usr/local/libexec/apiary/apiaryctl join-introduce --request-id %s --first-code %s --target %s --install-credentials\n", resp.GetRequestId(), firstCode, target)
+	fmt.Printf("  /usr/local/sbin/apiaryctl join-introduce --request-id %s --first-code %s --target %s --install-credentials\n", resp.GetRequestId(), firstCode, target)
 	return 0
 }
 
@@ -464,7 +464,7 @@ func buildJoinStatusRequest(requestID, firstCode string, certificatePEM ...strin
 // an empty field.
 func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile, nodeConfigPath string, installCredentials bool, reservationID string) int {
 	if firstCode == "" {
-		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `/usr/local/libexec/apiary/apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
+		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `/usr/local/sbin/apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
 		return 2
 	}
 	if target == "" {

@@ -21,7 +21,7 @@ about the deployment rather than about the design: **`force-restart` is
 an operation on a running Comb, so it has to be a file on the Comb, and
 a Comb has no source checkout to run a make target from.** It is now
 `apiaryctl force-restart` (ADR-0136, `internal/forcerestart`), installed
-to `/usr/local/libexec/apiary/apiaryctl` beside the daemons.
+to `/usr/local/sbin/apiaryctl` beside the daemons.
 
 **Amended 2026-09-28, later the same day: the make target is deleted,
 not retained as a convenience.** The paragraph above is superseded on

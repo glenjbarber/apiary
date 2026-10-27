@@ -112,7 +112,7 @@ but **stop before starting `apiary_raftd`**.
 **2. The joining Comb introduces itself and prints a first code.**
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl join-introduce --target leader.example.com:17700
+/usr/local/sbin/apiaryctl join-introduce --target leader.example.com:17700
 ```
 
 This prints a 6-digit **first code**, this Comb's certificate
@@ -132,7 +132,7 @@ you are on and what the next value is. It never renders the second PIN
 **4. The joining Comb polls for approval and installs its credentials.**
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl join-introduce \
+/usr/local/sbin/apiaryctl join-introduce \
     --request-id jreq-XXXX --first-code 123456 \
     --target leader.example.com:17700 --install-credentials
 ```
@@ -144,7 +144,7 @@ restarts `managerd` and `frontend` so they pick them up.
 reservation the preparing Comb printed:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl join-introduce \
+/usr/local/sbin/apiaryctl join-introduce \
     --request-id jreq-XXXX --first-code 123456 \
     --target leader.example.com:17700 --install-credentials \
     --reservation-id 7Qk2...Vi
@@ -164,10 +164,10 @@ does not match the join is refused.
 straight into another form:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl join-introduce --target leader:17700 --field first-code
-/usr/local/libexec/apiary/apiaryctl join-introduce --target leader:17700 --field fingerprints
-/usr/local/libexec/apiary/apiaryctl join-introduce --target leader:17700 --field request-id
-/usr/local/libexec/apiary/apiaryctl join-introduce --target leader:17700 --field second-pin
+/usr/local/sbin/apiaryctl join-introduce --target leader:17700 --field first-code
+/usr/local/sbin/apiaryctl join-introduce --target leader:17700 --field fingerprints
+/usr/local/sbin/apiaryctl join-introduce --target leader:17700 --field request-id
+/usr/local/sbin/apiaryctl join-introduce --target leader:17700 --field second-pin
 ```
 
 No labels, no quoting, no trailing explanation - because the output
@@ -281,7 +281,7 @@ resolves publicly and the certificate is trusted by browsers - set up
 the Cloudflare integration once with the guided walkthrough:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl cert-setup setup
+/usr/local/sbin/apiaryctl cert-setup setup
 ```
 
 It asks for a Cloudflare API token (read without echo, written to a
@@ -297,14 +297,14 @@ After the integration is saved, preparing a certificate for another
 Comb reuses it - no credential re-entry:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl cert-setup prepare --name host2.lab2.apiary.work
+/usr/local/sbin/apiaryctl cert-setup prepare --name host2.lab2.apiary.work
 ```
 
 That prints a **reservation ID**, which the joining Comb presents when
 it collects the certificate during the join:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl join-introduce \
+/usr/local/sbin/apiaryctl join-introduce \
     --request-id jreq-XXXX --first-code 123456 \
     --target leader.example.com:17700 --install-credentials \
     --reservation-id 7Qk2...Vi
@@ -376,7 +376,7 @@ The Machine page's per-service control restarts a service and confirms
 it came back. For the command line:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl force-restart
+/usr/local/sbin/apiaryctl force-restart
 ```
 
 It restarts `managerd` then `raftd`, confirming each by its own
@@ -392,7 +392,7 @@ be empty - which happens on a Colony built before that store existed.
 `apiaryctl pin-trusted-peers` backfills it:
 
 ```sh
-/usr/local/libexec/apiary/apiaryctl pin-trusted-peers \
+/usr/local/sbin/apiaryctl pin-trusted-peers \
     --target leader.example.com:17700 --bundle /tmp/certs.json
 ```
 
@@ -402,7 +402,7 @@ zero pins, not three.
 
 ## Command reference
 
-`apiaryctl` is installed at `/usr/local/libexec/apiary/apiaryctl` and is
+`apiaryctl` is installed at `/usr/local/sbin/apiaryctl` and is
 **not on `PATH`**. Invoke it by its full path.
 
 | Command | What it does | Root? |

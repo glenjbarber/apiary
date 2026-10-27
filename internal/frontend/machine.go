@@ -70,7 +70,7 @@ func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.
 	success := "Saved. This does not take effect until apiary_managerd restarts, and that cannot be done " +
 		"from this UI (ADR-0142): restarting managerd from inside managerd's own request kills the process " +
 		"that was about to start it again. From a root shell on this Comb, run `service apiary_managerd " +
-		"restart` (managerd alone), or `/usr/local/libexec/apiary/apiaryctl force-restart` (managerd then raftd, bypassing the restart " +
+		"restart` (managerd alone), or `/usr/local/sbin/apiaryctl force-restart` (managerd then raftd, bypassing the restart " +
 		"lease and quorum preflight)."
 	s.renderManagerdBindPanel(w, r, "", success)
 }
@@ -249,7 +249,7 @@ type configFieldSpec struct{ Field, Label, Dependency string }
 type configFieldOption struct{ Field, Label string }
 
 var configFieldSpecs = []configFieldSpec{
-	{"rpc_addr", "Managerd bind address", "Managerd gRPC clients and peer connections targeting this Comb. The new bind takes effect only after apiary_managerd restarts - not from this UI (ADR-0142): use `service apiary_managerd restart` or `/usr/local/libexec/apiary/apiaryctl force-restart` on this Comb."},
+	{"rpc_addr", "Managerd bind address", "Managerd gRPC clients and peer connections targeting this Comb. The new bind takes effect only after apiary_managerd restarts - not from this UI (ADR-0142): use `service apiary_managerd restart` or `/usr/local/sbin/apiaryctl force-restart` on this Comb."},
 	{"uplink", "Uplink", "VLAN-tagged managed networks and workloads using those networks. The network catalog is Colony-wide and does not identify which Comb physically hosts each network, so this dependency list is incomplete."},
 	{"nat_uplink", "NAT uplink", "Self-hosted managed-network outbound NAT on this Comb."},
 	{"dhcp_dns_server", "DHCP DNS server", "DHCP options advertised to clients on managed networks provisioned by this Comb."},

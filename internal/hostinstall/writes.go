@@ -291,7 +291,7 @@ func (p *Plan) planJoinAuthorizationStore() {
 			// running the report learns that no join will be
 			// approvable until it is fixed.
 			p.add(ActionRefuse, path, "contents", "", readErr.Error()+
-				" - left exactly as it is; no join can be approved on this Comb while it stays this way, and `/usr/local/libexec/apiary/apiaryctl join-authorize` will refuse to write to it")
+				" - left exactly as it is; no join can be approved on this Comb while it stays this way, and `/usr/local/sbin/apiaryctl join-authorize` will refuse to write to it")
 		case info.Mode().Perm() != 0o600:
 			p.add(ActionRefuse, path, "mode", fmt.Sprintf("%04o", info.Mode().Perm()),
 				"this file's whole authority is that only root can write it, and that is not its mode; chmod 600 it by hand. It is deliberately not chmodded here: tightening permissions on a file an operator may be reading right now is an unrequested change")
@@ -301,7 +301,7 @@ func (p *Plan) planJoinAuthorizationStore() {
 		}
 	case os.IsNotExist(err):
 		p.add(ActionCreate, path, "authorization entries", "0",
-			"ADR-0147 Part 3's operator authorization store, created empty: no Comb is authorized to join until an operator runs `/usr/local/libexec/apiary/apiaryctl join-authorize` on the leader. No RPC writes this file, and that is what makes an entry in it worth something")
+			"ADR-0147 Part 3's operator authorization store, created empty: no Comb is authorized to join until an operator runs `/usr/local/sbin/apiaryctl join-authorize` on the leader. No RPC writes this file, and that is what makes an entry in it worth something")
 		p.writes = append(p.writes, func() error {
 			return writeFileAtomic(path, []byte("{\n  \"authorizations\": []\n}\n"), 0o600)
 		})
