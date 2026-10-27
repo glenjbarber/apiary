@@ -199,6 +199,26 @@ jobs:
               ./${s} -version 2>&1 | head -1
             done
 
+            # The RELEASE VERSION must be stamped, and it must be the
+            # tag's. A build whose stamp silently failed to apply is
+            # worse than a build that failed: the artifacts publish,
+            # every daemon reports build=unknown or version=devel, and
+            # an operator has no way to tell a release from a
+            # development build.
+            #
+            # The version is derived from the tag by the project's own
+            # scripts/build-ldflags.sh, because the checkout is the
+            # tag. This asserts that derivation actually happened.
+            want_version="${GITHUB_REF_NAME#v}"
+            for s in raftd managerd frontend restshimd apiaryctl apiaryinstall versioncheck apiary-mcp; do
+              if ! ./${s} -version 2>&1 | head -1 | grep -q "version=${want_version}"; then
+                echo "${s} does not report version=${want_version}." >&2
+                echo "A release build must say which release it is." >&2
+                exit 1
+              fi
+            done
+            echo "every binary reports version=${want_version}: OK"
+
             # Confirm the cgo/PAM link is real. managerd must be linked
             # against libpam; a binary that is not was built without
             # PAM support and cannot authenticate anybody.
