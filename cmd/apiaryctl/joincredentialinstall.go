@@ -14,10 +14,13 @@ import (
 
 	"github.com/glenjbarber/apiary/internal/certintegration"
 	"github.com/glenjbarber/apiary/internal/colonycainstall"
+	"github.com/glenjbarber/apiary/internal/colonyleaf"
+	"github.com/glenjbarber/apiary/internal/colonyleafinstall"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/hostcert"
 	"github.com/glenjbarber/apiary/internal/joincredential"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
+	"github.com/glenjbarber/apiary/internal/raftdconfig"
 )
 
 const defaultRestartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
@@ -108,6 +111,38 @@ func installApprovedJoinCredentials(envelope []byte, servingCert *localCertifica
 		}
 	}
 
+	// ADR-0187: the joining Comb's OWN raft transport leaf, issued
+	// by the member that holds the Colony CA key and sealed to this
+	// Comb's certificate, is installed next.
+	//
+	// It is opened with THIS Comb's private key, so a leaf that was
+	// issued for another Comb simply fails to decrypt.
+	if bundle.ColonyCA != nil && bundle.ColonyCA.SealedLeaf != "" {
+		leaf, err := colonyleaf.Open([]byte(bundle.ColonyCA.SealedLeaf), []byte(servingCert.pem), privateKey,
+			requestID, identity.nodeID)
+		if err != nil {
+			return fmt.Errorf("opening the sealed raft transport leaf: %w", err)
+		}
+		if err := colonyleafinstall.Install(colonyleafinstall.InstallOptions{
+			Leaf:   leaf,
+			NodeID: identity.nodeID,
+			CADir:  colonycainstall.DefaultCADir,
+			Now:    time.Now(),
+		}); err != nil {
+			return fmt.Errorf("installing the raft transport leaf: %w", err)
+		}
+		// raftd's own configuration is pointed at the CA and at the
+		// leaf, so the transport can be encrypted. It is a separate
+		// step because a raftd pointed at material that was never
+		// published cannot start.
+		if err := colonyleafinstall.PointRaftdAtTheCA(raftdconfig.DefaultPath,
+			colonycainstall.DefaultCADir,
+			colonyleafinstall.DefaultLeafCertPath,
+			colonyleafinstall.DefaultLeafKeyPath); err != nil {
+			return fmt.Errorf("pointing raftd at the Colony CA: %w", err)
+		}
+	}
+
 	if err := installJoinCredentialBundle(bundle, managerConfigPath, frontendconfig.DefaultPath, defaultRestartGuardrailTokenPath); err != nil {
 		return err
 	}
@@ -125,9 +160,10 @@ func installApprovedJoinCredentials(envelope []byte, servingCert *localCertifica
 func installJoinCredentialBundle(bundle joincredential.Bundle, managerConfigPath, frontendConfigPath, tokenPath string) error {
 	// Version 1 carries the Colony's peer credentials. Version 2 adds
 	// the certificate integration (ADR-0174), for a Comb that was
-	// prepared for. A version outside those two is refused rather
-	// than half-read.
-	if bundle.Version != 1 && bundle.Version != 2 {
+	// prepared for. Version 3 adds the Colony CA and the joining
+	// Comb's own raft transport leaf (ADR-0186, ADR-0187). A version
+	// outside those three is refused rather than half-read.
+	if bundle.Version != 1 && bundle.Version != 2 && bundle.Version != 3 {
 		return fmt.Errorf("credential bundle uses an unsupported version %d", bundle.Version)
 	}
 	if bundle.RequestID == "" || bundle.NodeID == "" || bundle.PeerAPIKey == "" || bundle.RestartGuardrailToken == "" {

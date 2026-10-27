@@ -1,12 +1,14 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
+	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/colonyca"
 	"github.com/glenjbarber/apiary/internal/joinauth"
 	"github.com/glenjbarber/apiary/internal/joincredential"
@@ -39,7 +41,7 @@ import (
 // TLS configured and cannot produce its own CA cannot issue a
 // certificate for a joining Comb, and a join that silently produced a
 // Comb with no CA would fail later and further from its cause.
-func (s *Server) colonyCAForJoin(pending *internalpb.PendingJoinRequest) (*joincredential.ColonyCA, error) {
+func (s *Server) colonyCAForJoin(pending *internalpb.PendingJoinRequest, recipientCertificatePEM string) (*joincredential.ColonyCA, error) {
 	caPath, err := s.colonyCAPath()
 	if err != nil {
 		return nil, err
@@ -82,11 +84,99 @@ func (s *Server) colonyCAForJoin(pending *internalpb.PendingJoinRequest) (*joinc
 	if pinned == "" {
 		return nil, nil
 	}
-	return &joincredential.ColonyCA{
+	ca := &joincredential.ColonyCA{
 		CertificatePEM:    string(certPEM),
 		Fingerprint:       fingerprint,
 		PinnedFingerprint: pinned,
-	}, nil
+	}
+	// ADR-0187: the leaf is issued by the member that HOLDS the CA
+	// key, and the leader relays it.
+	//
+	// The leaf cannot be issued here. The CA key does not move - only
+	// the Comb that ran `apiaryctl colony-ca init` holds it, and on
+	// a live Colony that is not the leader. So the leader asks the
+	// holder, and the holder seals the leaf to the joining Comb.
+	//
+	// A LEAF IS NOT ALWAYS WANTED. A join whose authorization names
+	// no CA holder gets the CA and no leaf, which is the right answer
+	// for a Colony whose members do not use raft transport TLS.
+	sealedLeaf, err := s.sealedLeafForJoin(pending, ca, recipientCertificatePEM)
+	if err != nil {
+		return nil, err
+	}
+	ca.SealedLeaf = sealedLeaf
+	return ca, nil
+}
+
+// sealedLeafForJoin asks the member holding the Colony CA key to
+// issue a raft transport leaf for the joining Comb, and returns it
+// sealed to that Comb.
+//
+// The CA HOLDER is named in the join authorization, because the
+// operator is the only party that knows where the Colony's CA key
+// lives - the key does not move, and the leader is not necessarily
+// the Comb that holds it.
+//
+// A refusal here is a refusal, not a bundle without a leaf. A join
+// whose authorization named a CA holder and did not get a leaf is a
+// join that would produce a member the Colony cannot verify, and
+// letting it through would hide that until a handshake failed.
+func (s *Server) sealedLeafForJoin(pending *internalpb.PendingJoinRequest, ca *joincredential.ColonyCA, recipientCertificatePEM string) (string, error) {
+	holder, err := s.colonyCAHolderNodeID(pending)
+	if err != nil {
+		return "", err
+	}
+	if holder == "" {
+		return "", nil
+	}
+	if s.peers == nil {
+		return "", fmt.Errorf("the Colony's CA key is held by %q, and this Comb cannot reach it because peer forwarding is not configured", holder)
+	}
+	addr, err := s.peerManagerdAddrOfNodeID(holder)
+	if err != nil {
+		return "", err
+	}
+	resp, err := s.peers.IssueColonyRaftLeaf(context.Background(), addr, &rpcpb.IssueColonyRaftLeafRequest{
+		NodeId:                     pending.GetNodeId(),
+		RaftBindAddress:            pending.GetRaftBindAddress(),
+		RecipientTlsCertificatePem: recipientCertificatePEM,
+		RequestId:                  pending.GetRequestId(),
+		ExpectedCaFingerprint:      ca.PinnedFingerprint,
+	})
+	if err != nil {
+		return "", fmt.Errorf("asking %q, which holds the Colony CA key, to issue a raft transport leaf: %w", holder, err)
+	}
+	if resp.GetError() != "" {
+		return "", fmt.Errorf("asking %q, which holds the Colony CA key, to issue a raft transport leaf: %s", holder, resp.GetError())
+	}
+	if resp.GetSealedLeaf() == "" {
+		return "", fmt.Errorf("the Colony CA holder %q returned no leaf", holder)
+	}
+	return resp.GetSealedLeaf(), nil
+}
+
+// colonyCAHolderNodeID returns the raft identity of the member that
+// holds the Colony CA key, as named in the join authorization, or ""
+// when the authorization names none.
+//
+// A refusal to read the authorization store is NOT an error here: the
+// approval path reads the same store and reports it properly. A store
+// that cannot be read at this point means there is no named holder,
+// and the join simply gets the CA and no leaf.
+func (s *Server) colonyCAHolderNodeID(pending *internalpb.PendingJoinRequest) (string, error) {
+	load := s.joinAuthorizationRead
+	if load == nil {
+		load = func() (joinauth.Store, error) { return joinauth.Load(s.joinAuthorizationFile()) }
+	}
+	store, err := load()
+	if err != nil {
+		return "", nil
+	}
+	entry, refusal := store.Find(pending.GetNodeId(), pending.GetTlsCertFingerprint(), time.Now())
+	if refusal != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(entry.ColonyCAHolderNodeID), nil
 }
 
 // pinnedColonyCAFingerprint returns the Colony CA fingerprint the join
@@ -141,4 +231,33 @@ func (s *Server) colonyCAPath() (string, error) {
 		return "", nil
 	}
 	return path, nil
+}
+
+// peerManagerdAddrOfNodeID returns the managerd address of the member
+// with the given raft identity, resolved from CLUSTER STATE.
+//
+// It is the address lookup that makes the CA holder reachable, and
+// the source matters: the address comes from raft's own membership,
+// never from a caller-supplied one. The join poll is unauthenticated,
+// so an address that came from the request would be an address anyone
+// chose - and this call makes a Comb sign a certificate.
+//
+// A member that is not in the membership is a refusal naming it,
+// because a node id that names no member is a node id the caller got
+// wrong, and dialling something else with it would be worse than
+// refusing.
+func (s *Server) peerManagerdAddrOfNodeID(nodeID string) (string, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		return "", fmt.Errorf("the CA holder's node id is empty")
+	}
+	status, err := s.raft.Status(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("reading the Colony's membership to find %q, which holds the CA key: %w", nodeID, err)
+	}
+	for _, server := range status.GetServers() {
+		if server.GetId() == nodeID {
+			return peerManagerdAddrOf(server.GetAddress(), s.peerManagerdPort), nil
+		}
+	}
+	return "", fmt.Errorf("no member of this Colony has the node id %q, so the member holding the CA key cannot be found; the join authorization names a Comb that is not a member", nodeID)
 }

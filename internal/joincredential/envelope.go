@@ -111,6 +111,21 @@ type ColonyCA struct {
 	// colonyca one - so a caller cannot compare them by accident.
 	Fingerprint string `json:"fingerprint"`
 
+	// SealedLeaf is the joining Comb's OWN raft transport leaf, and
+	// its private key, sealed to the joining Comb's own certificate
+	// (ADR-0187).
+	//
+	// It is sealed by the member that HOLDS the Colony CA key, and
+	// it is opaque to everyone else - including the Colony leader
+	// that relayed it. The CA key itself never leaves its holder, so
+	// the leader cannot mint a leaf even though it can read the
+	// bundle.
+	//
+	// It is EMPTY when the joining Comb is not to be given a leaf -
+	// a Colony whose members do not use raft transport TLS, or a join
+	// whose authorization does not name a CA holder.
+	SealedLeaf string `json:"sealed_leaf,omitempty"`
+
 	// PinnedFingerprint is the fingerprint the OPERATOR pinned in the
 	// join authorization, which is the value the joiner checks
 	// Fingerprint against.

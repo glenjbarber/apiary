@@ -77,7 +77,7 @@ func (s *Server) sealApprovedJoinCredentials(ctx context.Context, req *rpcpb.Get
 	// The CA certificate is public, so it travels in the bundle
 	// because the bundle is already an authenticated channel to this
 	// exact Comb. The CA KEY never travels and never could.
-	colonyCA, err := s.colonyCAForJoin(pending)
+	colonyCA, err := s.colonyCAForJoin(pending, req.GetRecipientTlsCertificatePem())
 	if err != nil {
 		return nil, "", err
 	}

@@ -124,6 +124,13 @@ type PeerForwarder interface {
 	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
 	RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error)
 	SetColonyDiskSize(ctx context.Context, addr string, req *rpcpb.SetColonyDiskSizeRequest) (*rpcpb.SetColonyDiskSizeResponse, error)
+	// IssueColonyRaftLeaf asks the member holding the Colony CA key
+	// to issue a raft transport leaf for a joining Comb (ADR-0187).
+	//
+	// It is an AUTHENTICATED forward, unlike the join RPCs: the
+	// call makes a Comb sign a certificate, so it must not be
+	// answerable by whoever dialled.
+	IssueColonyRaftLeaf(ctx context.Context, addr string, req *rpcpb.IssueColonyRaftLeafRequest) (*rpcpb.IssueColonyRaftLeafResponse, error)
 	// AdvanceColonyEpoch forwards ADR-0156 Stage 2's generation advance
 	// to the Colony's leader, mirroring SetColonyDiskSize above.
 	AdvanceColonyEpoch(ctx context.Context, addr string, req *rpcpb.AdvanceColonyEpochRequest) (*rpcpb.AdvanceColonyEpochResponse, error)
