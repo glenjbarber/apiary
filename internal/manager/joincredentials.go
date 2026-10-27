@@ -70,14 +70,28 @@ func (s *Server) sealApprovedJoinCredentials(ctx context.Context, req *rpcpb.Get
 	if err != nil {
 		return nil, "", err
 	}
+	// ADR-0155 step 3: the Colony CA rides the SAME bundle, and the
+	// joiner checks it against the fingerprint the operator pinned
+	// before it trusts it.
+	//
+	// The CA certificate is public, so it travels in the bundle
+	// because the bundle is already an authenticated channel to this
+	// exact Comb. The CA KEY never travels and never could.
+	colonyCA, err := s.colonyCAForJoin(pending)
+	if err != nil {
+		return nil, "", err
+	}
 	bundleVersion := 1
 	if integration != nil {
 		bundleVersion = 2
 	}
+	if colonyCA != nil {
+		bundleVersion = 3
+	}
 	bundle := joincredential.Bundle{
 		Version: bundleVersion, RequestID: pending.GetRequestId(), NodeID: pending.GetNodeId(),
 		PeerAPIKey: key, RestartGuardrailToken: s.restartGuardrailToken,
-		Integration: integration,
+		Integration: integration, ColonyCA: colonyCA,
 	}
 	plain, err := json.Marshal(bundle)
 	if err != nil {

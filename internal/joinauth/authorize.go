@@ -61,6 +61,21 @@ type AuthorizeOptions struct {
 	// (24 hours, ADR-0147 question 1).
 	TTL time.Duration
 
+	// ColonyCAFingerprint is the Colony CA fingerprint this entry
+	// expects, in internal/colonyca's format (lowercase hex, no
+	// prefix, no separators).
+	//
+	// It is OPTIONAL. Empty means the entry says nothing about the
+	// Colony's CA, which is right for a Colony whose members do not
+	// use raft transport TLS.
+	//
+	// When it is set, it is the value the JOINING Comb checks the
+	// CA it receives against, and it travels to the joiner through
+	// the authorization rather than through the network. A joining
+	// Comb therefore never learns which CA to trust from the party
+	// it is joining.
+	ColonyCAFingerprint string
+
 	// Now defaults to time.Now. A parameter so an expiry can be tested
 	// without waiting a day, and so this package never reads a clock
 	// behind a caller's back - the same rule the FSM follows for the
@@ -172,10 +187,11 @@ func Authorize(opts AuthorizeOptions, pending []PendingRequest) (AuthorizeResult
 		return AuthorizeResult{}, fmt.Errorf("joinauth: generating an entry id: %w", err)
 	}
 	entry := Entry{
-		ID:            id,
-		NodeID:        opts.NodeID,
-		Fingerprint:   opts.Fingerprint,
-		ExpiresAtUnix: now().Add(ttl).Unix(),
+		ID:                  id,
+		NodeID:              opts.NodeID,
+		Fingerprint:         opts.Fingerprint,
+		ExpiresAtUnix:       now().Add(ttl).Unix(),
+		ColonyCAFingerprint: NormalizeCAFingerprint(opts.ColonyCAFingerprint),
 	}
 	store.Authorizations = append(store.Authorizations, entry)
 	if err := store.Save(path); err != nil {

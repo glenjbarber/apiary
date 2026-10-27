@@ -38,13 +38,19 @@ type Envelope struct {
 // Bundle is the plaintext payload sealed inside an Envelope. Callers should
 // keep it only in memory and must never log or persist it as a Raft value.
 //
-// The version is 1 or 2. Version 1 carries the Colony's peer
+// The version is 1, 2 or 3. Version 1 carries the Colony's peer
 // credentials and nothing else. Version 2 adds the certificate
 // INTEGRATION - the Cloudflare token and the public settings that go
-// with it - for a joining Comb that was prepared for.
+// with it - for a joining Comb that was prepared for. Version 3 adds
+// the COLONY CA, for a joining Comb that must issue raft transport
+// certificates and does not yet trust the Colony's CA.
 //
 // A joiner that only understands version 1 reads what it understands
-// and ignores the rest, which is what the version is for.
+// and ignores the rest, which is what the version is for. A joiner
+// that understands only version 2 and meets a version 3 bundle
+// REFUSES it rather than joining without the CA it needs - the
+// installer is where that check lives, and it is the installer's
+// judgement whether a Comb can join without one.
 type Bundle struct {
 	Version               int    `json:"version"`
 	RequestID             string `json:"request_id"`
@@ -60,6 +66,68 @@ type Bundle struct {
 	// Cloudflare credential to every one of them would multiply the
 	// blast radius of a single compromise for no benefit.
 	Integration *Integration `json:"integration,omitempty"`
+
+	// ColonyCA is the Colony's certificate authority, for a joining
+	// Comb that needs one (ADR-0155).
+	//
+	// It is EMPTY for a joining Comb whose Colony already issues its
+	// own leaves from a CA the Comb holds, and it is PRESENT when the
+	// joining Comb does not yet trust the Colony CA - which is the
+	// normal case for a Comb that has not joined before.
+	//
+	// The CA CERTIFICATE is public and travels in the sealed bundle
+	// because the bundle is already an authenticated channel to this
+	// exact Comb, sealed to the certificate it presented. The CA
+	// PRIVATE KEY never travels, and never could: it is the Colony's
+	// root of trust and it stays on the Comb that created it.
+	//
+	// A joiner does not trust this certificate because it was handed
+	// one. It trusts it because its FINGERPRINT matches the one the
+	// operator pinned in the join authorization - so the fingerprint
+	// is the part that carries the authority, and the certificate is
+	// only the thing the fingerprint is checked against.
+	ColonyCA *ColonyCA `json:"colony_ca,omitempty"`
+}
+
+// ColonyCA is the Colony certificate authority, carried to a joining
+// Comb so it can issue and verify raft transport certificates.
+//
+// It carries the certificate and the fingerprint the operator pinned.
+// The two are carried TOGETHER and the joiner checks them against
+// each other, because a certificate without the fingerprint would be
+// an anchor nobody compared, and a fingerprint without the
+// certificate would be a value nothing can be checked against.
+type ColonyCA struct {
+	// CertificatePEM is the CA certificate (public).
+	CertificatePEM string `json:"certificate_pem"`
+
+	// Fingerprint is the CA certificate's SHA-256, in
+	// internal/colonyca's own format: the lowercase hex of the DER
+	// bytes, with no prefix and no separators.
+	//
+	// It is NOT internal/hostcert's format ("SHA256:" followed by
+	// uppercase colon-separated pairs). ADR-0155 records that the two
+	// formats must never be compared directly, and this field is the
+	// colonyca one - so a caller cannot compare them by accident.
+	Fingerprint string `json:"fingerprint"`
+
+	// PinnedFingerprint is the fingerprint the OPERATOR pinned in the
+	// join authorization, which is the value the joiner checks
+	// Fingerprint against.
+	//
+	// The two are carried together deliberately. Fingerprint is the
+	// Colony's own computation of what it is sending; PinnedFingerprint
+	// is the value a human compared by hand, out of band, and recorded
+	// in a root-owned file.
+	//
+	// A joiner that only had Fingerprint would be checking the
+	// Colony's certificate against the Colony's own arithmetic, which
+	// proves nothing. A joiner that only had PinnedFingerprint would
+	// have nothing to check it against. The joiner needs BOTH, and it
+	// needs them to agree with each other AND with the certificate -
+	// which is what makes the join a pinned one rather than a
+	// supplied one.
+	PinnedFingerprint string `json:"pinned_fingerprint,omitempty"`
 }
 
 // Integration is the certificate integration provisioned to a joining

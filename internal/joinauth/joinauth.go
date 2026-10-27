@@ -103,6 +103,31 @@ type Entry struct {
 	// instant on every Comb that reads the file, and it has to survive
 	// a copy of the file being made hours apart.
 	ExpiresAtUnix int64 `json:"expires_at_unix"`
+
+	// ColonyCAFingerprint is the SHA-256 fingerprint of the Colony
+	// certificate authority this entry expects the joining Comb to be
+	// given, in internal/colonyca's own format: the lowercase hex of
+	// the certificate's DER bytes, with no prefix and no separators.
+	//
+	// It is OPTIONAL, and empty means "this entry says nothing about
+	// the Colony's CA". That is the right default for a Colony whose
+	// members do not use raft transport TLS, and it keeps an existing
+	// authorization file readable by a binary that has never heard of
+	// a Colony CA.
+	//
+	// It is NOT internal/hostcert's fingerprint format ("SHA256:"
+	// followed by uppercase colon-separated pairs). ADR-0155 records
+	// that the two formats must never be compared directly, and this
+	// field is the colonyca one. It is normalized by
+	// NormalizeCAFingerprint, which is a DIFFERENT function from
+	// NormalizeFingerprint precisely so the two cannot be mixed.
+	//
+	// Why it is here at all: the operator compares the Colony CA's
+	// fingerprint by hand, out of band, exactly as they compare a
+	// Comb's own certificate fingerprint. Recording that comparison
+	// in the authorization is what makes the CA the joining Comb
+	// receives a pinned one rather than merely a supplied one.
+	ColonyCAFingerprint string `json:"colony_ca_fingerprint,omitempty"`
 }
 
 // Store is the whole file. A named field rather than a bare array so
@@ -366,6 +391,24 @@ func NormalizeFingerprint(s string) string {
 		return strings.ToUpper(s)
 	}
 	return "SHA256:" + strings.ToUpper(s[7:])
+}
+
+// NormalizeCAFingerprint puts a Colony CA fingerprint in the one form
+// comparisons use.
+//
+// It is a DIFFERENT function from NormalizeFingerprint, on purpose.
+// A Comb's own certificate fingerprint is "SHA256:" followed by
+// uppercase colon-separated hex; a Colony CA's is the lowercase hex of
+// the DER bytes with no prefix and no separators. ADR-0155 records
+// that the two must never be compared directly, and giving them
+// separate normalizers is how a caller is prevented from doing that
+// by accident.
+//
+// The CA's own format is case-insensitive here for the same reason
+// the other one is: the value reaches a human through a terminal and
+// is retyped.
+func NormalizeCAFingerprint(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // Without returns a copy of s with every entry whose ID is in drop

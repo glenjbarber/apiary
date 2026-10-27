@@ -10,8 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/glenjbarber/apiary/internal/certintegration"
+	"github.com/glenjbarber/apiary/internal/colonycainstall"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/hostcert"
 	"github.com/glenjbarber/apiary/internal/joincredential"
@@ -52,13 +54,45 @@ func installApprovedJoinCredentials(envelope []byte, servingCert *localCertifica
 	if err := json.Unmarshal(plain, &bundle); err != nil {
 		return errors.New("decrypted credential bundle is malformed")
 	}
-	if bundle.RequestID != requestID || bundle.NodeID != identity.nodeID || bundle.Version != 1 {
+	if bundle.RequestID != requestID || bundle.NodeID != identity.nodeID {
 		return errors.New("decrypted credential bundle is bound to a different request or Comb")
+	}
+	// The version is 1, 2 or 3. A joiner that does not understand
+	// version 3 REFUSES it rather than joining without the Colony CA
+	// it needs - which is the whole point of putting the CA in the
+	// bundle. Joining without it would produce a member the Colony
+	// could not verify, and the failure would surface later and
+	// further from its cause.
+	if bundle.Version != 1 && bundle.Version != 2 && bundle.Version != 3 {
+		return fmt.Errorf("decrypted credential bundle uses an unsupported version %d", bundle.Version)
 	}
 	block, _ := pem.Decode([]byte(servingCert.pem))
 	if block == nil || hostcert.Fingerprint(block.Bytes) != servingCert.fingerprint {
 		return errors.New("local serving certificate changed during join credential installation")
 	}
+	// ADR-0155 step 3: the Colony CA is installed BEFORE the
+	// credentials, and it is the first thing that can fail on its own
+	// terms.
+	//
+	// The CA is checked against the fingerprint the OPERATOR PINNED
+	// in the join authorization - not against the fingerprint the
+	// Colony put in the same bundle. Checking the Colony's
+	// certificate against the Colony's own arithmetic would prove
+	// nothing; the pinned value is the one a human compared by hand.
+	//
+	// So the CA is installed first, because a CA that does not match
+	// what the operator pinned must stop the join BEFORE the
+	// credentials are written, not after.
+	if bundle.ColonyCA != nil {
+		pinned := bundle.ColonyCA.PinnedFingerprint
+		if pinned == "" {
+			return errors.New("the Colony's CA came with no pinned fingerprint, so it cannot be trusted; this Comb will not join a Colony whose CA nobody compared by hand")
+		}
+		if err := colonycainstall.Install(bundle.ColonyCA, pinned, colonycainstall.DefaultCADir, time.Now()); err != nil {
+			return fmt.Errorf("installing the Colony CA: %w", err)
+		}
+	}
+
 	// ADR-0174: the certificate integration is installed BEFORE the
 	// credentials, so that a Comb which was prepared for has its
 	// integration in place by the time it needs it - and so that a
