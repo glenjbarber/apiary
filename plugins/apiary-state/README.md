@@ -9,7 +9,7 @@ This is the Claude Code package. `plugins/apiary-mcp-connector` is the same
 connector packaged for a generic MCP host, and the two are alternatives -
 install one or the other. Both register an MCP server named `apiary`, so
 installing both leaves a host with two servers of the same name. See
-ADR-0178 for why they are kept separate.
+ADR-0183 for why they are kept separate.
 
 ## Setup
 

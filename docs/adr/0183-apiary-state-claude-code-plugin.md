@@ -1,4 +1,4 @@
-# ADR-0178: The Apiary state plugin for Claude Code
+# ADR-0183: The Apiary state plugin for Claude Code
 
 ## Status
 
