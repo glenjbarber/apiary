@@ -37,7 +37,7 @@
 # convention and it is what makes the build reproducible.
 
 PORTNAME=	apiary
-DISTVERSION=	0.1.0a1
+DISTVERSION=	1.0.0.a0
 PORTREVISION=	0
 CATEGORIES=	sysutils
 
