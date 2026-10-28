@@ -310,7 +310,7 @@ jobs:
             cp -a *.tar.gz SHA256SUMS ./ 2>/dev/null || true
 
       - name: Collect artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apiary-release
           path: |
