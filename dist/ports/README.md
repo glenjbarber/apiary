@@ -224,8 +224,9 @@ put a second source of truth next to the one the tool owns.
      first release actually is". It must agree with the tag that
      exists upstream.
 
-  3. **`MAINTAINER`.** `ports@FreeBSD.org` is a placeholder. A
-     submitted port needs a real maintainer address.
+  3. **`MAINTAINER`.** Set, to `gjb@FreeBSD.org` — the owner has
+     taken maintainership of the port, so this is no longer a
+     placeholder.
 
   4. **`LICENSE`.** The port declares `BSD2CLAUSE` with
      `LICENSE_FILE=${WRKSRC}/LICENSE`, which is what this project's
