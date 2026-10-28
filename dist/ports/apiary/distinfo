@@ -65,8 +65,8 @@
 # and it needs its own SHA256 line here, named after its full path in
 # the tree as well:
 #
-#	SHA256 (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/go.mod) = <sha256>
-#	SIZE (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/go.mod) = <size>
+SHA256 (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/go.mod) = 0000000000000000000000000000000000000000000000000000000000000000
+SIZE (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/go.mod) = 0
 #
 # Until that is filled in, `make checksum` will fail on the missing
 # distfile - which is the correct behaviour, and is why this file
@@ -83,5 +83,5 @@
 # hand-rolled `tar czf ... .` does not.
 
 TIMESTAMP = 0000000000
-SHA256 (glenjbarber-apiary-v0.1.0a1_GH0.tar.gz) = 0000000000000000000000000000000000000000000000000000000000000000
-SIZE (glenjbarber-apiary-v0.1.0a1_GH0.tar.gz) = 0
+SHA256 (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/glenjbarber-apiary-v0.1.0a1_GH0.tar.gz) = 0000000000000000000000000000000000000000000000000000000000000000
+SIZE (go/sysutils_apiary/glenjbarber-apiary-v0.1.0a1_GH0/glenjbarber-apiary-v0.1.0a1_GH0.tar.gz) = 0

@@ -91,7 +91,10 @@ MAINTAINER=	gjb@FreeBSD.org
 COMMENT=	Distributed virtualisation control plane for FreeBSD Combs
 WWW=		https://github.com/glenjbarber/apiary
 
-LICENSE=	BSD3CLAUSE
+# The project's own LICENSE is BSD 2-Clause, and a port that names
+# a DIFFERENT license is a licence misstatement in the package
+# metadata - so this is BSD2CLAUSE, not BSD3CLAUSE.
+LICENSE=	BSD2CLAUSE
 LICENSE_FILE=	${WRKSRC}/LICENSE
 
 # USES=go:modules builds in module-aware mode, which is required here
@@ -141,6 +144,7 @@ RUN_DEPENDS=	dns/dnsmasq:dnsmasq \
 # rc.d scripts exec /usr/local/libexec/apiary/<name> by absolute path,
 # so this path is load-bearing and must match the PLIST_SUB below.
 APIARY_LIBEXECDIR=	${PREFIX}/libexec/apiary
+APIARY_SBINDIR=		${PREFIX}/sbin
 APIARY_CONFDIR=		${PREFIX}/etc/apiary
 APIARY_DATADIR=		/var/db/apiary
 APIARY_LOGDIR=		/var/log/apiary
@@ -196,13 +200,13 @@ APIARY_RCSCRIPTS=	apiary_raftd \
 # framework's do-install target handles the "absolute destination"
 # case itself (it prefixes ${STAGEDIR}), which is exactly what is
 # needed for a libexec path rather than ${PREFIX}/bin.
-GO_TARGET=	./cmd/raftd:${PREFIX}/libexec/apiary/raftd \
-		./cmd/managerd:${PREFIX}/libexec/apiary/managerd \
-		./cmd/frontend:${PREFIX}/libexec/apiary/frontend \
-		./cmd/restshimd:${PREFIX}/libexec/apiary/restshimd \
-		./cmd/apiaryctl:${PREFIX}/libexec/apiary/apiaryctl \
-		./cmd/apiaryinstall:${PREFIX}/libexec/apiary/apiaryinstall \
-		./cmd/apiary-mcp:${PREFIX}/libexec/apiary/apiary-mcp
+GO_TARGET=	./cmd/raftd:${APIARY_LIBEXECDIR}/raftd \
+		./cmd/managerd:${APIARY_LIBEXECDIR}/managerd \
+		./cmd/frontend:${APIARY_LIBEXECDIR}/frontend \
+		./cmd/restshimd:${APIARY_LIBEXECDIR}/restshimd \
+		./cmd/apiaryctl:${APIARY_SBINDIR}/apiaryctl \
+		./cmd/apiaryinstall:${APIARY_LIBEXECDIR}/apiaryinstall \
+		./cmd/apiary-mcp:${APIARY_LIBEXECDIR}/apiary-mcp
 
 # The project's own build identity: -trimpath and -buildvcs=false are
 # already set by the go framework, and this port adds the ldflags that
