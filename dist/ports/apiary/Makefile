@@ -22,12 +22,12 @@ LICENSE_FILE=	${WRKSRC}/LICENSE
 
 USES=		go:modules
 
-RUN_DEPENDS=	dns/dnsmasq:dnsmasq
+RUN_DEPENDS=	dnsmasq:dns/dnsmasq
 
 OPTIONS_DEFINE=	QCOW2
 OPTIONS_DEFAULT=	QCOW2
 QCOW2_DESC=	qcow2 disk image support (measure/expand via qemu-img)
-QCOW2_RUN_DEPENDS=	emulators/qemu:qemu
+QCOW2_RUN_DEPENDS=	qemu-img:emulators/qemu
 
 # Apiary's own binaries live in libexec, not bin: they are daemons and
 # operator tools, not something an operator types by bare name. The
