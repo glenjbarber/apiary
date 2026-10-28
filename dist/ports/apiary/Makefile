@@ -5,10 +5,12 @@ DISTVERSION=	1.0.0.a0
 PORTREVISION=	0
 CATEGORIES=	sysutils
 
+# DISTVERSIONPREFIX is "release/", matching this project's actual
+# GitHub tag naming convention, not an assumed "v" prefix.
 GH_ACCOUNT=	glenjbarber
 GH_PROJECT=	apiary
 USE_GITHUB=	yes
-DISTVERSIONPREFIX=	v
+DISTVERSIONPREFIX=	release/
 
 GO_MOD_DIST=	github
 GO_MODULE=	github.com/glenjbarber/apiary
