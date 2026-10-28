@@ -19,5 +19,3 @@ control plane is split across four daemons plus two operator tools:
 An MCP connector (apiary-mcp) is installed alongside them, providing a
 read-only Model Context Protocol view of a Comb for external AI
 clients. It is disabled by default.
-
-WWW: https://github.com/glenjbarber/apiary

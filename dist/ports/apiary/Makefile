@@ -1,19 +1,7 @@
-# $FreeBSD$
-
 PORTNAME=	apiary
-DISTVERSION=	1.0.0.a0
-PORTREVISION=	0
-CATEGORIES=	sysutils
-
-# DISTVERSIONPREFIX is "release/", matching this project's actual
-# GitHub tag naming convention, not an assumed "v" prefix.
-GH_ACCOUNT=	glenjbarber
-GH_PROJECT=	apiary
-USE_GITHUB=	yes
 DISTVERSIONPREFIX=	release/
-
-GO_MOD_DIST=	github
-GO_MODULE=	github.com/glenjbarber/apiary
+DISTVERSION=	1.0.0.a0
+CATEGORIES=	sysutils
 
 MAINTAINER=	gjb@FreeBSD.org
 COMMENT=	Distributed virtualisation control plane for FreeBSD Combs
@@ -22,9 +10,15 @@ WWW=		https://apiary.work
 LICENSE=	BSD2CLAUSE
 LICENSE_FILE=	${WRKSRC}/LICENSE
 
-USES=		go:modules
-
 RUN_DEPENDS=	dnsmasq:dns/dnsmasq
+
+USES=		go:modules
+USE_GITHUB=	yes
+GH_ACCOUNT=	glenjbarber
+GH_PROJECT=	apiary
+
+GO_MOD_DIST=	github
+GO_MODULE=	github.com/glenjbarber/apiary
 
 OPTIONS_DEFINE=	QCOW2
 OPTIONS_DEFAULT=	QCOW2
