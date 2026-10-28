@@ -1,7 +1,7 @@
 PORTNAME=	apiary
 DISTVERSIONPREFIX=	release/
 DISTVERSION=	1.0.0.a0
-CATEGORIES=	sysutils
+CATEGORIES=	net-mgmt
 
 MAINTAINER=	gjb@FreeBSD.org
 COMMENT=	Distributed virtualisation control plane for FreeBSD Combs
