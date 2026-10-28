@@ -10,7 +10,7 @@ etc/rc.d/apiary_managerd
 etc/rc.d/apiary_frontend
 etc/rc.d/apiary_restshimd
 etc/rc.d/apiary_mcp
-@sample etc/apiary/README.md
+etc/apiary/README.md
 @sample etc/apiary/frontend.json.sample
 @sample etc/apiary/managerd.json.sample
 @sample etc/apiary/raftd.json.sample
