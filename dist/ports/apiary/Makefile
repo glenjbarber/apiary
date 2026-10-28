@@ -87,7 +87,7 @@ GO_MODULE=	github.com/glenjbarber/apiary
 # an upgrade.
 CONFLICTS_INSTALL=	apiary1
 
-MAINTAINER=	ports@FreeBSD.org
+MAINTAINER=	gjb@FreeBSD.org
 COMMENT=	Distributed virtualisation control plane for FreeBSD Combs
 WWW=		https://github.com/glenjbarber/apiary
 
