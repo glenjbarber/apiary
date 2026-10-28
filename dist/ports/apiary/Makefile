@@ -130,14 +130,23 @@ USES=		go:modules
 # (internal/jail, internal/cluster), bhyve/bhyvectl (internal/bhyve),
 # hastctl/hastd (internal/hast), pfctl (internal/pf), at (internal/
 # deadman), pw (internal/frontend/password.go), smart (internal/
-# hoststats/stats.go), qemu-img (internal/isostore) and dnsmasq (the
-# DHCP server Apiary drives, installed on demand by internal/install).
+# hoststats/stats.go), qemu-img (internal/isostore, qcow2 images only)
+# and dnsmasq (the DHCP server Apiary drives, installed on demand by
+# internal/install).
 #
 # ZFS, bhyve, jail and hast are all base-system components, not ports
-# packages, so they carry no dependency here. dnsmasq and qemu are
-# real ports.
-RUN_DEPENDS=	dns/dnsmasq:dnsmasq \
-		emulators/qemu:qemu
+# packages, so they carry no dependency here. dnsmasq is always
+# required; qemu is only needed for qcow2 image support (internal/
+# isostore's MeasureQcow2VirtualSize and ExpandQcow2Disk) and is
+# therefore an OPTIONS knob below rather than an unconditional
+# RUN_DEPENDS - an operator who only ever handles raw images should
+# not be forced to pull it in.
+RUN_DEPENDS=	dns/dnsmasq:dnsmasq
+
+OPTIONS_DEFINE=	QCOW2
+OPTIONS_DEFAULT=	QCOW2
+QCOW2_DESC=	qcow2 disk image support (measure/expand via qemu-img)
+QCOW2_RUN_DEPENDS=	emulators/qemu:qemu
 
 # Apiary's own binaries live in libexec, not bin: they are daemons and
 # operator tools, not something an operator types by bare name. The
