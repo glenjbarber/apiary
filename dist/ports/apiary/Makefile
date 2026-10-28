@@ -4,7 +4,7 @@ DISTVERSION=	1.0.0.a0
 CATEGORIES=	net-mgmt
 
 MAINTAINER=	gjb@FreeBSD.org
-COMMENT=	Distributed virtualisation control plane for FreeBSD Combs
+COMMENT=	Distributed virtualization control plane for FreeBSD Combs
 WWW=		https://apiary.work
 
 LICENSE=	BSD2CLAUSE
