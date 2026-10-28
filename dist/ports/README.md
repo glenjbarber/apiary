@@ -227,10 +227,12 @@ put a second source of truth next to the one the tool owns.
   3. **`MAINTAINER`.** `ports@FreeBSD.org` is a placeholder. A
      submitted port needs a real maintainer address.
 
-  4. **`LICENSE`.** The port declares `BSD3CLAUSE` with
-     `LICENSE_FILE=${WRKSRC}/LICENSE`. That is what this project's
-     own LICENSE file is, but a submitted port has to be checked
-     against the ports tree's current licence list.
+  4. **`LICENSE`.** The port declares `BSD2CLAUSE` with
+     `LICENSE_FILE=${WRKSRC}/LICENSE`, which is what this project's
+     own LICENSE file is. **This was corrected from `BSD3CLAUSE`**,
+     which named a licence the project is not under - a licence
+     misstatement in the package metadata, and one a ports reviewer
+     would rightly reject.
 
   5. **`COMMIT` and `WWW`.** The comment and the URL are written from
      the project's own README and are accurate as far as they go, but
@@ -271,8 +273,9 @@ What was run, and what it showed:
 
 The staged tree is exactly the intended one:
 
+    usr/local/sbin/apiaryctl
     usr/local/libexec/apiary/{raftd,managerd,frontend,restshimd,
-                               apiaryctl,apiaryinstall,apiary-mcp}
+                               apiaryinstall,apiary-mcp}
     usr/local/etc/rc.d/apiary_{raftd,managerd,frontend,restshimd,mcp}
     usr/local/etc/apiary/{README.md,frontend.json.sample,
                            managerd.json.sample,raftd.json.sample,
