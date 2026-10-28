@@ -61,9 +61,9 @@ GO_TARGET=	./cmd/raftd:${APIARY_LIBEXECDIR}/raftd \
 
 GO_BUILDFLAGS+=	-ldflags "-X github.com/glenjbarber/apiary/internal/buildinfo.BuildID=${APIARY_BUILD_ID} -X github.com/glenjbarber/apiary/internal/buildinfo.BuildTime=${APIARY_BUILD_TIME} -X github.com/glenjbarber/apiary/internal/buildinfo.GitCommit=${APIARY_BUILD_COMMIT}"
 
-APIARY_BUILD_COMMIT=	6ceae35735e117c342450979d4d0602e5c6f486ba7493a025f205fd55af17cfa
-APIARY_BUILD_ID=	6ceae35735e1
-APIARY_BUILD_TIME=	1970-01-01T00:00:00Z
+APIARY_BUILD_COMMIT=	e5e071e84c4140b0325e820bc29dcafc4cf6e16d
+APIARY_BUILD_ID=	e5e071e84c41
+APIARY_BUILD_TIME=	2026-10-28T18:09:08Z
 
 PLIST_SUB=	APIARY_LIBEXECDIR=${APIARY_LIBEXECDIR} \
 		APIARY_CONFDIR=${APIARY_CONFDIR} \
