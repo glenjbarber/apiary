@@ -165,6 +165,19 @@ PLIST_DIRS=	${_APIARY_DATADIR} \
 		${_APIARY_LOGDIR} \
 		${_APIARY_RUNDIR}
 
+PLIST_FILES=	"@sample ${_APIARY_CONFDIR}/frontend.json.sample" \
+		"@sample ${_APIARY_CONFDIR}/managerd.json.sample" \
+		"@sample ${_APIARY_CONFDIR}/raftd.json.sample" \
+		${_APIARY_CONFDIR}/README.md \
+		"@sample ${_APIARY_CONFDIR}/restshimd.json.sample" \
+		${_APIARY_LIBEXECDIR}/apiary-mcp \
+		${_APIARY_LIBEXECDIR}/apiaryinstall \
+		${_APIARY_LIBEXECDIR}/frontend \
+		${_APIARY_LIBEXECDIR}/managerd \
+		${_APIARY_LIBEXECDIR}/raftd \
+		${_APIARY_LIBEXECDIR}/restshimd \
+		sbin/apiaryctl
+
 PLIST_SUB=	_APIARY_CONFDIR=${_APIARY_CONFDIR} \
 		_APIARY_DATADIR=${_APIARY_DATADIR} \
 		_APIARY_LIBEXECDIR=${_APIARY_LIBEXECDIR} \
@@ -184,20 +197,6 @@ PLIST_SUB=	_APIARY_CONFDIR=${_APIARY_CONFDIR} \
 # post-install, because they are named by the project's own
 # etc/apiary/ directory rather than by anything the ports framework
 # knows about.
-PLIST_FILES=	${_APIARY_CONFDIR}/frontend.json.sample \
-		${_APIARY_CONFDIR}/managerd.json.sample \
-		${_APIARY_CONFDIR}/raftd.json.sample \
-		${_APIARY_CONFDIR}/README.md \
-		${_APIARY_CONFDIR}/restshimd.json.sample \
-		${_APIARY_LIBEXECDIR}/apiary-mcp \
-		${_APIARY_LIBEXECDIR}/apiaryinstall \
-		${_APIARY_LIBEXECDIR}/frontend \
-		${_APIARY_LIBEXECDIR}/managerd \
-		${_APIARY_LIBEXECDIR}/raftd \
-		${_APIARY_LIBEXECDIR}/restshimd \
-		@sample \
-		sbin/apiaryctl
-
 # The upstream README is the port's documentation. It goes to
 # ${PREFIX}/share/doc/apiary, which is where an operator looks for a
 # package's documentation, rather than to the etc/apiary directory
