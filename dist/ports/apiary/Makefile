@@ -17,7 +17,6 @@ LICENSE_FILE=	${WRKSRC}/LICENSE
 # read one header out of a tarball.
 BUILD_DEPENDS=	git:devel/git@lite
 RUN_DEPENDS=	dnsmasq:dns/dnsmasq
-
 # The bhyve UEFI firmware is deliberately NOT a dependency.
 #
 # bhyve itself is in the base system, but the .fd file bhyve boots from
