@@ -107,8 +107,8 @@ PLIST_SUB=	_APIARY_CONFDIR=${_APIARY_CONFDIR} \
 
 PORTDOCS=	README.md
 
-OPTIONS_DEFINE=		QCOW2
-OPTIONS_DEFAULT=	QCOW2
+OPTIONS_DEFINE=		DOCS QCOW2
+OPTIONS_DEFAULT=	DOCS QCOW2
 QCOW2_DESC=		qcow2 disk image support (measure/expand via qemu-img)
 QCOW2_RUN_DEPENDS=	qemu-img:emulators/qemu
 
@@ -124,5 +124,10 @@ post-install:
 	@${MKDIR} ${STAGEDIR}${_APIARY_DATADIR}/isos
 	@${MKDIR} ${STAGEDIR}${_APIARY_RUNDIR}
 	@${MKDIR} ${STAGEDIR}${_APIARY_LOGDIR}
+
+do-install-DOCS-on:
+	@${MKDIR} ${STAGEDIR}${DOCSDIR}
+	${INSTALL_DATA} ${WRKSRC}/README.md \
+		${STAGEDIR}${DOCSDIR}
 
 .include <bsd.port.mk>
