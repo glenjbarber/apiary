@@ -54,3 +54,4 @@ go.work.sum
 
 # Claude Code agent worktrees (local scratch, not repo content)
 /.claude/
+/work/
