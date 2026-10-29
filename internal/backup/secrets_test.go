@@ -113,6 +113,13 @@ func TestNodeConfigDenyListIsComplete(t *testing.T) {
 			"CloudflareTokenFile":             {},
 			"CloudflareTunnelCredentialsFile": {},
 			"OriginCATokenFile":               {},
+			// The external discovery providers' credential paths
+			// (ADR-0191's Proxmox provider, ADR-0192's Sylve
+			// provider). The path is recorded so a restore operator
+			// knows what to re-provision; the token's content never
+			// reaches an archive.
+			"ProxmoxDiscoveryTokenFile": {},
+			"SylveDiscoveryTokenFile":   {},
 		})
 }
 

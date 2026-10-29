@@ -159,6 +159,13 @@ func (f *fakeClient) GetMonitoringCluster(ctx context.Context, _ *rpcpb.GetMonit
 	return f.monitoringClusterResp, f.monitoringClusterErr
 }
 
+// GetExternalDiscovery is the ADR-0191/ADR-0192 external discovery
+// report. The fake returns an empty report: a node with no external
+// discovery configured is a normal configuration.
+func (f *fakeClient) GetExternalDiscovery(ctx context.Context, _ *rpcpb.GetExternalDiscoveryRequest, _ ...grpc.CallOption) (*rpcpb.GetExternalDiscoveryResponse, error) {
+	return &rpcpb.GetExternalDiscoveryResponse{}, nil
+}
+
 func (f *fakeClient) GetMonitoringNodes(ctx context.Context, _ *rpcpb.GetMonitoringNodesRequest, _ ...grpc.CallOption) (*rpcpb.GetMonitoringNodesResponse, error) {
 	f.lastMonitoringNodesCtx = ctx
 	return f.monitoringNodesResp, f.monitoringNodesErr

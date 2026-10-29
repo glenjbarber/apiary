@@ -318,6 +318,13 @@ func (f *fakeClient) GetMonitoringNodes(context.Context, *rpcpb.GetMonitoringNod
 	return &rpcpb.GetMonitoringNodesResponse{}, nil
 }
 
+// GetExternalDiscovery is the ADR-0191/ADR-0192 external discovery
+// report. The fake returns an empty report: a node with no external
+// discovery configured is a normal configuration.
+func (f *fakeClient) GetExternalDiscovery(context.Context, *rpcpb.GetExternalDiscoveryRequest, ...grpc.CallOption) (*rpcpb.GetExternalDiscoveryResponse, error) {
+	return &rpcpb.GetExternalDiscoveryResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

@@ -101,6 +101,13 @@ var requiredRole = map[string]Role{
 	// not verdicts about anything an operator can change.
 	"/apiary.rpc.v1.ManagerService/GetMonitoringCluster": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetMonitoringNodes":   RoleViewer,
+	// GetExternalDiscovery (ADR-0191's Proxmox provider, ADR-0192's
+	// Sylve provider) is a READ of Apiary's own record of what other
+	// management planes said. It is Viewer, the same tier as the
+	// monitoring reports above: it carries observations, not verdicts
+	// about anything an operator can change, and it can never be used
+	// to change a provider's state.
+	"/apiary.rpc.v1.ManagerService/GetExternalDiscovery": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/HostPackages":         RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListNodeServices":     RoleViewer,
 

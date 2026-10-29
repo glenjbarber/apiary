@@ -53,6 +53,7 @@ const (
 	ManagerService_ClusterHealth_FullMethodName                       = "/apiary.rpc.v1.ManagerService/ClusterHealth"
 	ManagerService_GetMonitoringCluster_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetMonitoringCluster"
 	ManagerService_GetMonitoringNodes_FullMethodName                  = "/apiary.rpc.v1.ManagerService/GetMonitoringNodes"
+	ManagerService_GetExternalDiscovery_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetExternalDiscovery"
 	ManagerService_GetVMConsole_FullMethodName                        = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_ProxyVMConsole_FullMethodName                      = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -357,6 +358,19 @@ type ManagerServiceClient interface {
 	// Viewer-authorized, the same tier as HostStats and ClusterHealth.
 	GetMonitoringCluster(ctx context.Context, in *GetMonitoringClusterRequest, opts ...grpc.CallOption) (*GetMonitoringClusterResponse, error)
 	GetMonitoringNodes(ctx context.Context, in *GetMonitoringNodesRequest, opts ...grpc.CallOption) (*GetMonitoringNodesResponse, error)
+	// GetExternalDiscovery reports what the read-only external discovery
+	// providers (ADR-0191's Proxmox provider, ADR-0192's Sylve provider)
+	// have observed.
+	//
+	// These are READS of Apiary's own record of other systems' state.
+	// They are Viewer-authorized, the same tier as the monitoring reports
+	// above: they carry observations, not verdicts about anything an
+	// operator can change.
+	//
+	// A discovered host or guest is NOT an Apiary Comb and NOT an Apiary
+	// cell. It is an observation of a resource some other management
+	// plane owns, and this RPC never implies that Apiary manages it.
+	GetExternalDiscovery(ctx context.Context, in *GetExternalDiscoveryRequest, opts ...grpc.CallOption) (*GetExternalDiscoveryResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -1546,6 +1560,16 @@ func (c *managerServiceClient) GetMonitoringNodes(ctx context.Context, in *GetMo
 	return out, nil
 }
 
+func (c *managerServiceClient) GetExternalDiscovery(ctx context.Context, in *GetExternalDiscoveryRequest, opts ...grpc.CallOption) (*GetExternalDiscoveryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetExternalDiscoveryResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetExternalDiscovery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVMConsoleResponse)
@@ -2712,6 +2736,19 @@ type ManagerServiceServer interface {
 	// Viewer-authorized, the same tier as HostStats and ClusterHealth.
 	GetMonitoringCluster(context.Context, *GetMonitoringClusterRequest) (*GetMonitoringClusterResponse, error)
 	GetMonitoringNodes(context.Context, *GetMonitoringNodesRequest) (*GetMonitoringNodesResponse, error)
+	// GetExternalDiscovery reports what the read-only external discovery
+	// providers (ADR-0191's Proxmox provider, ADR-0192's Sylve provider)
+	// have observed.
+	//
+	// These are READS of Apiary's own record of other systems' state.
+	// They are Viewer-authorized, the same tier as the monitoring reports
+	// above: they carry observations, not verdicts about anything an
+	// operator can change.
+	//
+	// A discovered host or guest is NOT an Apiary Comb and NOT an Apiary
+	// cell. It is an observation of a resource some other management
+	// plane owns, and this RPC never implies that Apiary manages it.
+	GetExternalDiscovery(context.Context, *GetExternalDiscoveryRequest) (*GetExternalDiscoveryResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -3660,6 +3697,9 @@ func (UnimplementedManagerServiceServer) GetMonitoringCluster(context.Context, *
 func (UnimplementedManagerServiceServer) GetMonitoringNodes(context.Context, *GetMonitoringNodesRequest) (*GetMonitoringNodesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMonitoringNodes not implemented")
 }
+func (UnimplementedManagerServiceServer) GetExternalDiscovery(context.Context, *GetExternalDiscoveryRequest) (*GetExternalDiscoveryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetExternalDiscovery not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
 }
@@ -4563,6 +4603,24 @@ func _ManagerService_GetMonitoringNodes_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetMonitoringNodes(ctx, req.(*GetMonitoringNodesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetExternalDiscovery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExternalDiscoveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetExternalDiscovery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetExternalDiscovery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetExternalDiscovery(ctx, req.(*GetExternalDiscoveryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -6382,6 +6440,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetMonitoringNodes",
 			Handler:    _ManagerService_GetMonitoringNodes_Handler,
+		},
+		{
+			MethodName: "GetExternalDiscovery",
+			Handler:    _ManagerService_GetExternalDiscovery_Handler,
 		},
 		{
 			MethodName: "GetVMConsole",

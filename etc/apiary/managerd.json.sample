@@ -53,5 +53,15 @@
   "acme_account_key_file": "",
   "acme_directory_url": "",
   "acme_email": "",
-  "raftd_token": ""
+  "raftd_token": "",
+  "proxmox_discovery_enabled": false,
+  "proxmox_discovery_url": "",
+  "proxmox_discovery_token_file": "",
+  "proxmox_discovery_ca_file": "",
+  "proxmox_discovery_interval": 0,
+  "sylve_discovery_enabled": false,
+  "sylve_discovery_url": "",
+  "sylve_discovery_token_file": "",
+  "sylve_discovery_ca_file": "",
+  "sylve_discovery_interval": 0
 }
