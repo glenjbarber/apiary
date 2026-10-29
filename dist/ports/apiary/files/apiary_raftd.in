@@ -59,20 +59,9 @@ apiary_raftd_poststop()
 	fi
 }
 
-# The runtime directory. On a stock FreeBSD /var/run is a tmpfs, so a
-# directory the package created there does not survive a reboot: the
-# package creates it at install time, and it is gone at the next boot.
-# raftd is where it is recreated, because raftd is the daemon that owns
-# the socket inside it (/var/run/apiary/raftd.sock) and every other
-# apiary daemon dials that socket. The rc.d scripts' own REQUIRE
-# ordering - managerd requires raftd, and frontend and restshimd
-# require managerd - means raftd has already started by the time any
-# of them run.
-#
-# It is created here rather than left to raftd's own MkdirAll because
-# raftd creates it mode 0700, and the socket inside it is mode 0660 for
-# the group that runs the other daemons. A directory created here is
-# 0755, and the socket's own mode is what carries the access control.
+# /var/run is a tmpfs, so the package's runtime directory is gone at
+# the next boot. raftd owns the socket inside it, and the REQUIRE
+# ordering puts raftd before every daemon that dials that socket.
 start_precmd="apiary_raftd_precmd"
 apiary_raftd_precmd()
 {
