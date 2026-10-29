@@ -35,8 +35,10 @@ import (
 	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/origincert"
+	"github.com/glenjbarber/apiary/internal/proxmoxdiscovery"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
+	"github.com/glenjbarber/apiary/internal/sylvediscovery"
 )
 
 // pamAuthenticator abstracts a username/password check, defined
@@ -446,6 +448,16 @@ type Server struct {
 	// translation from a hostpkg.Inventory to its wire form is the part
 	// worth testing, and it must be testable without pkg installed.
 	hostPkgCollect func(context.Context) (hostpkg.Inventory, error)
+
+	// discovery holds this node's read-only external discovery
+	// providers - ADR-0191's Proxmox provider and ADR-0192's Sylve
+	// provider.
+	//
+	// It is nil when no provider is configured, and the discovery RPC
+	// then returns an empty report rather than an error: a node with
+	// no external discovery configured is a normal configuration, not
+	// a failure.
+	discovery *discoveryState
 
 	// peers is nil on a node with no peer forwarding configured (see
 	// cmd/managerd's own -peer-api-key) - a leader-only read rejected by
@@ -863,6 +875,27 @@ func (s *Server) SetColonyJoinWindowSeconds(seconds int64) {
 	if seconds > 0 {
 		s.colonyJoinWindowSecondsSet = seconds
 	}
+}
+
+// SetDiscoveryState wires this node's read-only external discovery
+// providers after construction.
+//
+// It is a setter, like SetHASTStatusReader, because the providers are
+// built from configuration that the manager package does not own. A
+// nil state means no provider is configured, and the discovery RPC
+// then returns an empty report.
+func (s *Server) SetDiscoveryState(state *discoveryState) { s.discovery = state }
+
+// SetDiscoveryProviders wires the external discovery providers from
+// configuration and starts their poll loops.
+//
+// It returns the state it built so that a caller - or a test - can
+// drive a scan directly without waiting for the first tick.
+func (s *Server) SetDiscoveryProviders(ctx context.Context, proxmoxCfg *proxmoxdiscovery.Config, sylveCfg *sylvediscovery.Config, proxmoxInterval, sylveInterval time.Duration) *discoveryState {
+	state := newDiscoveryState(proxmoxCfg, sylveCfg, proxmoxInterval, sylveInterval)
+	s.discovery = state
+	state.Run(ctx)
+	return state
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.

@@ -216,6 +216,24 @@ var DenyList = []SecretField{
 // rebuilt Comb comes up mysteriously unauthenticated.
 var SecretPaths = []SecretPath{
 	{
+		Kind:             SecretPathProxmoxDiscoveryToken,
+		StructName:       "nodeconfig.Config",
+		FieldName:        "ProxmoxDiscoveryTokenFile",
+		JSONName:         "proxmox_discovery_token_file",
+		Why:              "the value is a path to a file holding the Proxmox API token the read-only discovery provider (ADR-0191) presents on every poll; the path is recorded so a restore operator knows what to re-provision, and the token's content is never copied",
+		LiveCopy:         "the file this path names, mode-restricted, on this Comb",
+		RestoreProcedure: "re-issue the Proxmox API token with the minimum discovery privileges and write it to this path on the rebuilt Comb",
+	},
+	{
+		Kind:             SecretPathSylveDiscoveryToken,
+		StructName:       "nodeconfig.Config",
+		FieldName:        "SylveDiscoveryTokenFile",
+		JSONName:         "sylve_discovery_token_file",
+		Why:              "the value is a path to a file holding the Sylve bearer token the read-only discovery provider (ADR-0192) presents on every poll; it must belong to a non-admin Sylve identity, and the path is recorded while the token is never copied",
+		LiveCopy:         "the file this path names, mode-restricted, on this Comb",
+		RestoreProcedure: "provision a non-admin Sylve identity and write its token to this path on the rebuilt Comb",
+	},
+	{
 		Kind:       SecretPathTLSKey,
 		StructName: "nodeconfig.Config",
 		FieldName:  "TLSKey",
@@ -300,6 +318,16 @@ const (
 	SecretPathFrontendTLSKey SecretPathKind = "frontendconfig.tls_key"
 	// SecretPathOriginCertKey is origincert.InventoryEntry.KeyPath.
 	SecretPathOriginCertKey SecretPathKind = "origincert.key_path"
+
+	// SecretPathProxmoxDiscoveryToken is
+	// nodeconfig.Config.ProxmoxDiscoveryTokenFile - the Proxmox API
+	// token the read-only discovery provider (ADR-0191) presents on
+	// every poll.
+	SecretPathProxmoxDiscoveryToken SecretPathKind = "nodeconfig.proxmox_discovery_token_file"
+	// SecretPathSylveDiscoveryToken is
+	// nodeconfig.Config.SylveDiscoveryTokenFile - the bearer token the
+	// read-only discovery provider (ADR-0192) presents on every poll.
+	SecretPathSylveDiscoveryToken SecretPathKind = "nodeconfig.sylve_discovery_token_file"
 )
 
 // SecretPath is one entry in the path table. It carries the same four
@@ -709,6 +737,24 @@ type NodeConfigRecord struct {
 	// credentials. Recorded as paths on the same reasoning as TLSKey
 	// above. CloudflareZoneID and CloudflareTunnelID are public
 	// identifiers and are recorded normally.
+	// ProxmoxDiscovery* and SylveDiscovery* are the read-only external
+	// discovery providers' settings (ADR-0191, ADR-0192). The URL,
+	// the CA bundle path, the enabled flag, and the interval are
+	// ordinary configuration and are recorded; the CREDENTIAL paths
+	// beside them are secret paths and are not - they are in the deny
+	// list above, so they never reach a manifest.
+	ProxmoxDiscoveryEnabled   bool          `json:"proxmox_discovery_enabled,omitempty"`
+	ProxmoxDiscoveryURL       string        `json:"proxmox_discovery_url,omitempty"`
+	ProxmoxDiscoveryTokenFile string        `json:"proxmox_discovery_token_file,omitempty"`
+	ProxmoxDiscoveryCAFile    string        `json:"proxmox_discovery_ca_file,omitempty"`
+	ProxmoxDiscoveryInterval  time.Duration `json:"proxmox_discovery_interval,omitempty"`
+
+	SylveDiscoveryEnabled   bool          `json:"sylve_discovery_enabled,omitempty"`
+	SylveDiscoveryURL       string        `json:"sylve_discovery_url,omitempty"`
+	SylveDiscoveryTokenFile string        `json:"sylve_discovery_token_file,omitempty"`
+	SylveDiscoveryCAFile    string        `json:"sylve_discovery_ca_file,omitempty"`
+	SylveDiscoveryInterval  time.Duration `json:"sylve_discovery_interval,omitempty"`
+
 	CloudflareTokenFile             string `json:"cloudflare_token_file,omitempty"`
 	CloudflareZoneID                string `json:"cloudflare_zone_id,omitempty"`
 	CloudflareTunnelID              string `json:"cloudflare_tunnel_id,omitempty"`
@@ -804,6 +850,18 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 		TLSKey:  cfg.TLSKey,
 
 		PAMService: cfg.PAMService,
+
+		ProxmoxDiscoveryEnabled:   cfg.ProxmoxDiscoveryEnabled,
+		ProxmoxDiscoveryURL:       cfg.ProxmoxDiscoveryURL,
+		ProxmoxDiscoveryTokenFile: cfg.ProxmoxDiscoveryTokenFile,
+		ProxmoxDiscoveryCAFile:    cfg.ProxmoxDiscoveryCAFile,
+		ProxmoxDiscoveryInterval:  cfg.ProxmoxDiscoveryInterval,
+
+		SylveDiscoveryEnabled:   cfg.SylveDiscoveryEnabled,
+		SylveDiscoveryURL:       cfg.SylveDiscoveryURL,
+		SylveDiscoveryTokenFile: cfg.SylveDiscoveryTokenFile,
+		SylveDiscoveryCAFile:    cfg.SylveDiscoveryCAFile,
+		SylveDiscoveryInterval:  cfg.SylveDiscoveryInterval,
 
 		CloudflareTokenFile:             cfg.CloudflareTokenFile,
 		CloudflareZoneID:                cfg.CloudflareZoneID,

@@ -3,9 +3,25 @@
 ## Status
 
 **Proposed.** This record designs Apiary's integration with Proxmox as a
-**node discovery and enrollment provider**. It is **not implemented** in
-the tree this ADR lands beside: there is no Proxmox client, no Proxmox
-configuration, and no Proxmox provider interface in `internal/` today.
+**node discovery and enrollment provider**.
+
+**Implemented 2026-10-29 (discovery only).** The provider exists in
+`internal/proxmoxdiscovery`, the shared provider seam in
+`internal/extdiscovery`, the configuration in `internal/nodeconfig`, and
+the read surface as `ManagerService.GetExternalDiscovery`.
+
+**What is implemented is the DISCOVERY half.** The **enrollment** half -
+mapping a discovered node into Apiary's inventory and enrolling it under
+Apiary's trust and authorization policy - is **not** implemented, and the
+reason is the one this record's Context section establishes: Apiary's
+inventory IS its raft membership, so there is no inventory for a
+discovered Proxmox node to be enrolled into. Building that requires the
+separate external-node store this record describes, and that store does
+not exist yet. See "Implementation Follow-up".
+
+The implementation confirmed this record's decisions rather than changing
+them. The one thing it could not settle is the open `Sys.Audit`
+privilege question, which is an owner decision and is unchanged.
 
 Supersedes: None
 Superseded by: None
@@ -595,7 +611,47 @@ inbound path can reuse the same trust model rather than invent a second.
 
 ## Implementation Follow-up
 
-The implementation should establish:
+**What the implementation established:**
+
+1. **The endpoint contract** is pinned to the three endpoints verified
+   above. The provider's allowlist is a compile-time constant, so it
+   cannot be widened by configuration - and the test asserts that
+   Proxmox's mutating paths are absent from it.
+2. **The endpoint allowlist is exact.** `internal/extdiscovery`'s
+   matcher compares literal path segments and admits exactly one
+   parameterised segment, so `/nodes` cannot admit `/nodes/{node}/tasks`.
+3. **The identity key** is implemented as the composite
+   `(provider, cluster_key, node_name)` with `ssl_fingerprint` as the
+   conflict-detection attribute. The implementation's own store records
+   a **fingerprint change under a matched key** as a conflict and leaves
+   the stored record untouched, and records a **fingerprint seen under a
+   different key** as a rename conflict - both are tested.
+4. **The error model** is `internal/extdiscovery`'s `ProviderError` and
+   its state mapping. A `401` is unauthorized and a `403` is forbidden,
+   and neither is ever mistaken for an empty inventory - both are
+   tested.
+5. **The reconciliation behaviour** is implemented as the store's
+   `Apply`: a failed or partial scan preserves every record, and only a
+   complete scan records absence.
+6. **The tests cover** a clustered scan, a standalone node with no
+   `cluster` row, `401`, `403`, a partial scan where one node's detail
+   could not be read, an empty-but-complete scan, a missing credential,
+   and a plaintext base URL - and assert that the provider issues only
+   `GET` and never requests a path outside its allowlist.
+
+**What still needs establishing:**
+
+- **The `Sys.Audit` privilege question**, which is an owner decision and
+  is unchanged by the implementation. The provider works with either
+  privilege set; granting `Sys.Audit` on `/` is what makes the cluster
+  name available.
+- **The enrollment half**, which requires the separate external-node
+  store this record describes. That store does not exist, and building
+  it is the substantive remaining work.
+- **The minimum supported Proxmox version**, which needs the endpoint
+  contract checked against a live installation.
+
+The implementation should further establish:
 
 1. **The supported Proxmox interfaces and minimum supported versions.**
    The endpoints identified here (`GET /nodes`, `GET /cluster/status`,

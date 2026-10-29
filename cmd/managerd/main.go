@@ -46,9 +46,11 @@ import (
 	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/internal/peerca"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/proxmoxdiscovery"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
+	"github.com/glenjbarber/apiary/internal/sylvediscovery"
 	"github.com/glenjbarber/apiary/internal/tlscache"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
@@ -630,6 +632,35 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The read-only external discovery providers of ADR-0191 (Proxmox)
+	// and ADR-0192 (Sylve).
+	//
+	// They are OFF unless configured, and their credentials are PATHS
+	// to root-owned files rather than the secrets themselves - the same
+	// posture the Cloudflare and Origin CA token files already use.
+	//
+	// A provider that cannot be constructed is logged and skipped
+	// rather than being fatal: a bad CA bundle on one provider must
+	// not stop managerd from serving the rest of its API.
+	var proxmoxDiscoveryCfg *proxmoxdiscovery.Config
+	if cfg.ProxmoxDiscoveryEnabled {
+		proxmoxDiscoveryCfg = &proxmoxdiscovery.Config{
+			BaseURL:   cfg.ProxmoxDiscoveryURL,
+			CAFile:    cfg.ProxmoxDiscoveryCAFile,
+			TokenFile: cfg.ProxmoxDiscoveryTokenFile,
+		}
+	}
+	var sylveDiscoveryCfg *sylvediscovery.Config
+	if cfg.SylveDiscoveryEnabled {
+		sylveDiscoveryCfg = &sylvediscovery.Config{
+			BaseURL:   cfg.SylveDiscoveryURL,
+			CAFile:    cfg.SylveDiscoveryCAFile,
+			TokenFile: cfg.SylveDiscoveryTokenFile,
+		}
+	}
+	srv.SetDiscoveryProviders(ctx, proxmoxDiscoveryCfg, sylveDiscoveryCfg,
+		cfg.ProxmoxDiscoveryInterval, cfg.SylveDiscoveryInterval)
 
 	go runReconcileLoop(ctx, reconciler, cfg.ReconcileInterval)
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)

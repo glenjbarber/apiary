@@ -229,6 +229,20 @@ service ManagerService {
   rpc GetMonitoringCluster(GetMonitoringClusterRequest) returns (GetMonitoringClusterResponse);
   rpc GetMonitoringNodes(GetMonitoringNodesRequest) returns (GetMonitoringNodesResponse);
 
+  // GetExternalDiscovery reports what the read-only external discovery
+  // providers (ADR-0191's Proxmox provider, ADR-0192's Sylve provider)
+  // have observed.
+  //
+  // These are READS of Apiary's own record of other systems' state.
+  // They are Viewer-authorized, the same tier as the monitoring reports
+  // above: they carry observations, not verdicts about anything an
+  // operator can change.
+  //
+  // A discovered host or guest is NOT an Apiary Comb and NOT an Apiary
+  // cell. It is an observation of a resource some other management
+  // plane owns, and this RPC never implies that Apiary manages it.
+  rpc GetExternalDiscovery(GetExternalDiscoveryRequest) returns (GetExternalDiscoveryResponse);
+
   // GetVMConsole reports how to reach a running VM's VNC framebuffer,
   // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
   // this only answers for a VM actually running on *this* node - see
@@ -5956,4 +5970,161 @@ message IssueManagerdRestartResponse {
 
   // error is set on every refusal and is never empty when accepted=false.
   string error = 7;
+}
+
+// GetExternalDiscoveryRequest asks for the external discovery
+// providers' current observations.
+//
+// An empty provider means "every configured provider".
+message GetExternalDiscoveryRequest {
+  // provider selects one provider ("proxmox", "sylve"). Empty means
+  // every configured provider.
+  string provider = 1;
+}
+
+// GetExternalDiscoveryResponse carries the providers' observations.
+//
+// The per-provider state is what makes the difference between "this
+// provider found nothing" and "this provider could not be reached"
+// visible to a caller - the two are otherwise indistinguishable, and
+// they need completely different responses from whoever is looking.
+message GetExternalDiscoveryResponse {
+  // providers carries one entry per configured provider.
+  repeated ExternalDiscoveryProviderReport providers = 1;
+
+  // error is set when the report could not be assembled at all.
+  string error = 2;
+}
+
+// ExternalDiscoveryProviderReport is one provider's current state and
+// what it observed.
+message ExternalDiscoveryProviderReport {
+  // provider is the provider's short identifier ("proxmox", "sylve").
+  string provider = 1;
+
+  // source_id identifies the provider installation the observations
+  // came from - the cluster name for a clustered provider. It is EMPTY
+  // when the provider does not cluster, which is a fact about the
+  // source rather than a missing value.
+  string source_id = 2;
+
+  // state is the scan's state: "fresh", "stale", "partial",
+  // "unavailable", "empty", "unauthorized", "forbidden", or
+  // "conflict".
+  //
+  // An unrecognized state must be treated as unknown, never as
+  // healthy. That is the whole failure mode the discovery state
+  // vocabulary exists to prevent.
+  string state = 3;
+
+  // last_scan is when the scan that produced this report was taken.
+  int64 last_scan = 4;
+
+  // error is the failure detail, when there was one. It is empty for
+  // a successful scan.
+  string error = 5;
+
+  // nodes carries the observed hosts.
+  repeated ExternalDiscoveryNode nodes = 6;
+
+  // resources carries the observed guests.
+  repeated ExternalDiscoveryResource resources = 7;
+
+  // absent_nodes carries the identities a complete scan did not
+  // contain. These are REPORTED, not deleted: a host that vanished
+  // from a provider's listing is very often one that is down.
+  repeated string absent_nodes = 8;
+
+  // conflicts carries records that could not be placed unambiguously.
+  // They are surfaced for review and never silently merged.
+  repeated ExternalDiscoveryConflict conflicts = 9;
+}
+
+// ExternalDiscoveryNode is one observed host.
+//
+// This is NOT a Comb. It carries no raft membership, no suffrage, and
+// no health verdict - it is an observation of a host another
+// management plane owns.
+message ExternalDiscoveryNode {
+  // provider is the provider that produced the observation.
+  string provider = 1;
+
+  // source_id identifies the provider installation.
+  string source_id = 2;
+
+  // name is the provider's own name for the host.
+  string name = 3;
+
+  // fingerprint is the provider's stable per-node identity anchor, if
+  // it exposes one.
+  string fingerprint = 4;
+
+  // status is the provider's own status, VERBATIM and unnormalized.
+  //
+  // An unrecognized value must be preserved rather than mapped: a
+  // provider that reports "unknown" and one that reports "offline"
+  // are different facts.
+  string status = 5;
+
+  // observed_at is when Apiary last saw this host.
+  int64 observed_at = 6;
+}
+
+// ExternalDiscoveryResource is one observed guest.
+//
+// This is NOT a cell. It carries no desired state, no phase, and no
+// ownership - it is an observation of a guest another management plane
+// owns.
+message ExternalDiscoveryResource {
+  // provider is the provider that produced the observation.
+  string provider = 1;
+
+  // source_id identifies the provider installation.
+  string source_id = 2;
+
+  // node_name is the provider's name for the host it lives on.
+  string node_name = 3;
+
+  // node_id is the provider's stable node identity, where it exposes
+  // one.
+  string node_id = 4;
+
+  // kind is "vm" or "jail". The two are kept distinct even though
+  // Apiary models both through one cell abstraction.
+  string kind = 5;
+
+  // source_resource_id is the provider's own identifier for the guest.
+  string source_resource_id = 6;
+
+  // name is the guest's display name. It is NOT part of the identity:
+  // a display name can be reused.
+  string name = 7;
+
+  // state is the provider's observed state, VERBATIM and unnormalized.
+  string state = 8;
+
+  // observed_at is when Apiary last saw this guest.
+  int64 observed_at = 9;
+}
+
+// ExternalDiscoveryConflict is one record that could not be placed
+// unambiguously.
+//
+// Every field is plain data rather than a status code, because a
+// conflict is something an operator has to look at.
+message ExternalDiscoveryConflict {
+  // kind is "node" or "resource".
+  string kind = 1;
+
+  // key is the composite identity that was matched.
+  string key = 2;
+
+  // reason names the conflict in words an operator can act on.
+  string reason = 3;
+
+  // observed_fingerprint is the fingerprint seen now.
+  string observed_fingerprint = 4;
+
+  // known_fingerprint is the fingerprint already recorded.
+  string known_fingerprint = 5;
 }

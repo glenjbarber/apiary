@@ -349,6 +349,79 @@ type Config struct {
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
 	RaftdToken string `json:"raftd_token,omitempty"`
+
+	// The external discovery provider settings below configure the
+	// READ-ONLY discovery providers of ADR-0191 (Proxmox) and
+	// ADR-0192 (Sylve).
+	//
+	// They are node-local, not replicated: a provider credential is a
+	// per-host secret, and copying one into raft would make a
+	// per-host secret into Colony state.
+	//
+	// Both credential fields are PATHS, never the secret itself, and
+	// they follow the same posture as CloudflareTokenFile above - a
+	// root-owned file whose path is configuration.
+
+	// ProxmoxDiscoveryEnabled turns the Proxmox discovery provider on.
+	// It is off by default: an installation with no Proxmox
+	// environment must not be polling one.
+	ProxmoxDiscoveryEnabled bool `json:"proxmox_discovery_enabled,omitempty"`
+
+	// ProxmoxDiscoveryURL is the pveproxy HTTPS origin, e.g.
+	// "https://pve.example.com:8006".
+	//
+	// HTTPS IS REQUIRED. A plaintext URL is refused at startup
+	// rather than tolerated, because the provider sends its credential
+	// on every poll and a credential sent in cleartext is disclosed
+	// to the network.
+	ProxmoxDiscoveryURL string `json:"proxmox_discovery_url,omitempty"`
+
+	// ProxmoxDiscoveryTokenFile is the path to the file holding the
+	// Proxmox API token. The file is read fresh on each scan, so
+	// rotation takes effect without a restart.
+	ProxmoxDiscoveryTokenFile string `json:"proxmox_discovery_token_file,omitempty"`
+
+	// ProxmoxDiscoveryCAFile is an optional path to a PEM bundle of
+	// trusted roots for the Proxmox endpoint.
+	//
+	// A private CA is supported by pointing this at its bundle. There
+	// is deliberately NO insecure-skip-verify option: a discovery
+	// client whose certificate checks can be disabled is a client
+	// whose observations can be forged, and a forged observation is
+	// indistinguishable from a real one.
+	ProxmoxDiscoveryCAFile string `json:"proxmox_discovery_ca_file,omitempty"`
+
+	// ProxmoxDiscoveryInterval is the poll interval. Zero means the
+	// default.
+	ProxmoxDiscoveryInterval time.Duration `json:"proxmox_discovery_interval,omitempty"`
+
+	// SylveDiscoveryEnabled turns the Sylve discovery provider on.
+	SylveDiscoveryEnabled bool `json:"sylve_discovery_enabled,omitempty"`
+
+	// SylveDiscoveryURL is the Sylve API origin including its "/api"
+	// base path, e.g. "https://sylve.example.com:8181/api".
+	//
+	// HTTPS IS REQUIRED, for the same reason as above.
+	SylveDiscoveryURL string `json:"sylve_discovery_url,omitempty"`
+
+	// SylveDiscoveryTokenFile is the path to the file holding the
+	// Sylve bearer token.
+	//
+	// The token must belong to a NON-ADMIN Sylve identity: Sylve's
+	// authorization model refuses a non-admin token on every
+	// mutating route, while its LOGIN flow cannot mint one. The
+	// credential is therefore provisioned out of band, and this
+	// provider never logs in as an administrator to obtain one.
+	SylveDiscoveryTokenFile string `json:"sylve_discovery_token_file,omitempty"`
+
+	// SylveDiscoveryCAFile is an optional path to a PEM bundle of
+	// trusted roots for the Sylve endpoint, with the same posture as
+	// ProxmoxDiscoveryCAFile above.
+	SylveDiscoveryCAFile string `json:"sylve_discovery_ca_file,omitempty"`
+
+	// SylveDiscoveryInterval is the poll interval. Zero means the
+	// default.
+	SylveDiscoveryInterval time.Duration `json:"sylve_discovery_interval,omitempty"`
 }
 
 // scopePathFields lists the write-once resource-scope fields (see the
@@ -585,6 +658,24 @@ func validate(cfg Config) error {
 		return err
 	}
 	if err := validatePathField("acme_account_key_file", cfg.AcmeAccountKeyFile); err != nil {
+		return err
+	}
+	if err := validatePathField("proxmox_discovery_token_file", cfg.ProxmoxDiscoveryTokenFile); err != nil {
+		return err
+	}
+	if err := validatePathField("proxmox_discovery_ca_file", cfg.ProxmoxDiscoveryCAFile); err != nil {
+		return err
+	}
+	if err := validatePathField("sylve_discovery_token_file", cfg.SylveDiscoveryTokenFile); err != nil {
+		return err
+	}
+	if err := validatePathField("sylve_discovery_ca_file", cfg.SylveDiscoveryCAFile); err != nil {
+		return err
+	}
+	if err := validateDiscoveryProvider("proxmox", cfg.ProxmoxDiscoveryEnabled, cfg.ProxmoxDiscoveryURL, cfg.ProxmoxDiscoveryTokenFile, cfg.ProxmoxDiscoveryInterval); err != nil {
+		return err
+	}
+	if err := validateDiscoveryProvider("sylve", cfg.SylveDiscoveryEnabled, cfg.SylveDiscoveryURL, cfg.SylveDiscoveryTokenFile, cfg.SylveDiscoveryInterval); err != nil {
 		return err
 	}
 	if err := validateDatasetOrPrefix("zfs_base", cfg.ZFSBase); err != nil {
@@ -898,4 +989,50 @@ func validInterfaceName(name string) bool {
 		}
 	}
 	return true
+}
+
+// validateDiscoveryProvider checks one read-only discovery provider's
+// configuration.
+//
+// The rules are deliberately strict, because a discovery provider that
+// is misconfigured in a way that "mostly works" is a provider whose
+// observations cannot be trusted:
+//
+//   - An ENABLED provider must have a base URL and a credential file.
+//     A provider that is enabled with no credential would fail on
+//     every scan, and the operator would learn about it from a
+//     warning rather than at startup.
+//
+//   - The base URL must be HTTPS. A plaintext URL is REFUSED rather
+//     than tolerated: the provider sends its credential on every poll,
+//     and a credential sent in cleartext is disclosed to the network.
+//
+//   - The poll interval must be positive when set. A zero or negative
+//     interval is a value that is present but wrong, and the same
+//     rule the rest of this file follows applies - it is an error, not
+//     a silent fallback.
+func validateDiscoveryProvider(name string, enabled bool, baseURL, tokenFile string, interval time.Duration) error {
+	if interval < 0 {
+		return fmt.Errorf("nodeconfig: invalid %s_discovery_interval %v: must not be negative", name, interval)
+	}
+	if !enabled {
+		return nil
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return fmt.Errorf("nodeconfig: %s discovery is enabled but %s_discovery_url is empty", name, name)
+	}
+	if strings.TrimSpace(tokenFile) == "" {
+		return fmt.Errorf("nodeconfig: %s discovery is enabled but %s_discovery_token_file is empty", name, name)
+	}
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return fmt.Errorf("nodeconfig: invalid %s_discovery_url %q: %w", name, baseURL, err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("nodeconfig: %s_discovery_url must use https, got %q", name, parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("nodeconfig: %s_discovery_url must include a host", name)
+	}
+	return nil
 }
