@@ -414,6 +414,22 @@ committed, or into `rc.conf` on a shared host.
 
 ### Enabling it
 
+**Give the connector its own Viewer key first.** The connector calls
+five read RPCs, all of them Viewer-tier, so the key it carries should
+be a Viewer key and nothing more. A key that is Viewer-tier cannot
+reach an Admin RPC even if something in the connector's allowlist
+changes, because managerd's role map — not the connector — decides
+what a key may do. A key that is Admin-tier, by contrast, would let a
+compromised connector reach writes that the connector itself never
+offers.
+
+Create the key on the Apiary Keys page, or through the `CreateAPIKey`
+RPC with `role: "viewer"`. The raw key is returned exactly once and
+only its SHA-256 digest is stored, so this is the only moment the
+value is available to copy. Name it for its purpose (for example
+`apiary-mcp-connector`) so that it can be revoked later on its own,
+without touching the other keys on the Comb.
+
 The service reads its two secrets from a file, not from the environment:
 
 ```bash
@@ -449,6 +465,43 @@ The service binds to `127.0.0.1:8787` by default and the connector
 host is therefore an explicit operator act: put a TLS reverse proxy or a
 private tunnel in front of it. That restriction is in the code, not a
 convention in the rc script.
+
+#### The rc.conf knobs
+
+The rc script reads its non-secret settings from `rc.conf`. All of
+them have defaults; an operator sets only the ones that differ.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `apiary_mcp_enable` | `NO` | Whether the service starts at boot. |
+| `apiary_mcp_manager_addr` | `127.0.0.1:17700` | The managerd the connector reads. |
+| `apiary_mcp_transport` | `http` | `http` or `stdio`. The service must use `http`. |
+| `apiary_mcp_listen` | `127.0.0.1:8787` | The HTTP listen address. Loopback only. |
+| `apiary_mcp_secrets` | `/usr/local/etc/apiary/mcp-secrets` | The secrets file. |
+| `apiary_mcp_args` | empty | Extra arguments for the connector. |
+| `apiary_mcp_logfile` | `/var/log/apiary/mcp.log` | Where the connector logs. |
+
+**Set `apiary_mcp_manager_addr` on any host where managerd is not on
+loopback.** The default is `127.0.0.1:17700`, but managerd binds its
+`rpc_addr` from `managerd.json` — on a normal installation that is the
+node's LAN address, not loopback. A connector left on the default
+address therefore fails to reach managerd on every host but one that
+happens to run managerd on loopback, and the failure names
+`APIARY_MANAGER_ADDR` rather than the address being wrong, because from
+the connector's own point of view the variable *is* set.
+
+**Use the hostname, not the IP, in that address.** The connector
+verifies managerd's certificate, and the certificate is issued for the
+node's hostname. An IP address in `APIARY_MANAGER_ADDR` makes the
+connector derive the TLS server name from the IP, which does not match
+the certificate; `APIARY_MANAGER_SERVER_NAME` can correct that, but the
+rc script does not set it, so the address itself has to carry the name
+the certificate is issued for.
+
+```bash
+# In /etc/rc.conf, for a node whose managerd is on its LAN address:
+apiary_mcp_manager_addr="<this-node-hostname>:17700"
+```
 
 To use it from another host:
 

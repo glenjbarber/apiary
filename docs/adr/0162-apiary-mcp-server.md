@@ -14,7 +14,17 @@ Two things that verification confirmed about the design, and which are worth rec
 
   - **The secrets file is the deployment's own contract.** `/usr/local/etc/apiary/mcp-secrets` is mode 0600 and root-owned, and the rc script reads it with a plain read loop rather than sourcing it. The connector still refuses to start with a named reason when the file is absent.
 
-The connector has NOT been exercised against a production Colony: the verification above used a test API key, and the tool calls themselves were made against the live service rather than against a running Apiary. What remains of issue #26 is orcli's client work, which is tracked in the other repository.
+**Exercised against a live Colony 2026-10-29.** The connector has now been run against a running Apiary, not only against a stub. It was deployed as the installed service on a control host in the Colony, carrying a **dedicated Viewer key** rather than a test key, and every one of the three tools was called against the live cluster: `list_cells` returned the two running VMs with their node assignments and phases, `get_cell` returned one of them by `(type, id)`, and `get_cluster_health` returned a health verdict for every Comb in the Colony. The tool calls were driven by **orcli's real MCP client** over the deployed service's Streamable HTTP endpoint, not by a hand-written HTTP request.
+
+That exercise also confirmed the authorization half of the design, which the protocol-level checks above could not: the same Viewer key is **refused** an Admin-tier RPC (`ListAPIKeys` returns `PermissionDenied`) while the five read RPCs the connector uses succeed. The connector's read-only property therefore rests on two independent gates — the connector's own allowlist, and managerd's role map — and either one alone would have held.
+
+Two deployment details this added, both now documented in `etc/apiary/README.md`:
+
+  - **The rc script's default manager address does not match a normal installation.** It defaults to `127.0.0.1:17700`, but managerd binds its `rpc_addr` from `managerd.json`, which on a normal installation is the node's LAN address. A connector left on the default reaches nothing on any host that is not unusual in this way, and the refusal names `APIARY_MANAGER_ADDR` rather than the address being wrong. The rc.conf knob is `apiary_mcp_manager_addr`.
+
+  - **The address must carry the hostname, not the IP.** The connector verifies managerd's certificate, and the certificate is issued for the node's hostname, so an IP in `APIARY_MANAGER_ADDR` derives a TLS server name that does not match it. The rc script does not set `APIARY_MANAGER_SERVER_NAME`, so the address itself has to name what the certificate names.
+
+What remains of issue #26 is orcli's client work, which is tracked in the other repository.
 
 Supersedes: None
 Superseded by: None
