@@ -50,7 +50,8 @@ GO_TARGET=	./cmd/apiary-mcp:${_APIARY_LIBEXECDIR}/apiary-mcp \
 # source archives carry the commit in their pax global header, and the
 # tarball's member mtimes are the commit's own date.
 pre-build:
-	@commit=$$(gzip -dc ${DISTFILES} 2>/dev/null | git get-tar-commit-id) ; \
+	@commit=$$(gzip -dc ${_DISTDIR}/${DISTFILES:M*.tar.gz} 2>/dev/null | \
+		git get-tar-commit-id) ; \
 	if [ -z "$$commit" ] ; then \
 		${ECHO_MSG} "===>  ERROR: the distfile carries no commit id." ; \
 		${ECHO_MSG} "    The build stamp is derived from the tarball's pax" ; \
