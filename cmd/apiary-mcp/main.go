@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -97,8 +98,13 @@ func main() {
 }
 
 // settingsFile is the path of the settings file consulted for any setting
-// the environment leaves unset. APIARY_MCP_ENV_FILE overrides it, and the
-// default is ~/.config/apiary/mcp.env.
+// the environment leaves unset.
+//
+// APIARY_MCP_ENV_FILE overrides it. Otherwise it is $XDG_CONFIG_HOME/apiary/
+// mcp.env, or ~/.config/apiary/mcp.env when XDG_CONFIG_HOME is unset.
+// XDG_CONFIG_HOME is the mechanism every Linux and BSD client already
+// honours, so a plugin host can point the connector at its own config
+// directory without knowing anything about Apiary.
 //
 // The file exists because a plugin host cannot always pass an environment to
 // the process it launches. A Claude Code plugin's .mcp.json may declare an
@@ -110,11 +116,35 @@ func settingsFile() string {
 	if path := os.Getenv("APIARY_MCP_ENV_FILE"); path != "" {
 		return path
 	}
-	home, err := os.UserHomeDir()
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "apiary", "mcp.env")
+	}
+	home, err := homeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, ".config", "apiary", "mcp.env")
+}
+
+// homeDir finds the invoking user's home directory.
+//
+// os.UserHomeDir reads $HOME, and a host that launches the connector as a
+// subprocess may not set it: a plugin host that passes a minimal
+// environment is the very case this file exists to serve. So when $HOME is
+// absent the passwd database is consulted instead, and the connector still
+// finds its settings.
+func homeDir() (string, error) {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home, nil
+	}
+	current, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	if current.HomeDir == "" {
+		return "", errors.New("no home directory for the current user")
+	}
+	return current.HomeDir, nil
 }
 
 // readSettingsFile parses KEY=value lines. A missing file is not an error:

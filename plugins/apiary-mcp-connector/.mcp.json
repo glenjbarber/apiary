@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "apiary": {
-      "command": "apiary-mcp",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/apiary-mcp",
       "args": []
     }
   }

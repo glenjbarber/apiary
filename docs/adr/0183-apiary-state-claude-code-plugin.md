@@ -1,10 +1,14 @@
-# ADR-0183: The Apiary state plugin for Claude Code
+# ADR-0183: The Apiary plugin package
 
 ## Status
 
 **Proposed.** This record decides how the read-only `apiary-mcp` connector
-is exposed to Claude Code, and where that exposure sits relative to the
+is exposed to AI clients, and where that exposure sits relative to the
 `apiary-mcp-connector` package already in the tree.
+
+**Section 1 was superseded on 2026-10-30.** It decided there would be two
+packages, one per client family. There is one package, satisfying both the
+Agent Plugins 1.0.0 specification and the Claude Code plugin format.
 
 Supersedes: None
 Superseded by: None
@@ -40,25 +44,44 @@ the tools mean or, more importantly, what they must NOT be used for.
 
 ## Decision
 
-### 1. `plugins/apiary-state/` is a Claude Code plugin, and it is separate from `apiary-mcp-connector`
+### 1. There is ONE plugin package, and it satisfies both specifications
 
-They are different packages for different hosts, not two versions of one
-thing:
+**Superseded 2026-10-30.** This section originally decided that
+`plugins/apiary-state/` and `plugins/apiary-mcp-connector/` were two
+packages for two hosts. That was wrong, and the reason was not visible
+until the package was actually installed somewhere.
 
-- `apiary-mcp-connector` is the agent-plugins.org package, for a generic
-  MCP host. It carries a `com.openai` extension block and a schema URL.
-- `apiary-state` is the Claude Code package. It carries a
-  `.claude-plugin/plugin.json` manifest and a `skills/apiary-state/SKILL.md`.
+The Agent Plugins 1.0.0 specification
+(<https://agent-plugins.org/specification>) defines a portable package
+format, and its technical steering committee includes Amazon, Cursor,
+Microsoft, OpenAI and Vercel. The two formats turned out to agree on
+almost everything:
 
-Both configure the same `apiary-mcp` binary. That is deliberate, and it
-is not duplication of work: there is ONE connector binary (ADR-0162's
-"wrap the binary, do not vendor a second copy" decision), and each
-package is a thin description of how one host should launch it.
+| | Agent Plugins 1.0.0 | Claude Code |
+| --- | --- | --- |
+| Manifest | `plugin.json` at the root | `.claude-plugin/plugin.json` |
+| MCP config | `mcp.json` at the root | `.mcp.json` at the root |
+| Skills | `skills/<name>/SKILL.md` | `skills/<name>/SKILL.md` |
+| Command | `./bin/x`, resolved against the root | `${CLAUDE_PLUGIN_ROOT}/bin/x` |
+| Binaries | the package's own | `bin/` is on the client's `PATH` |
 
-The two are not meant to be installed together. Both register an MCP
-server named `apiary`, so a host that loads both has two servers with one
-name. Each README says which one it is, and the Claude Code package
-names its relationship to the other explicitly.
+So one directory can carry both manifests, both MCP configurations, one
+`skills/` tree and one `bin/`, and it loads in either client. The two
+manifests differ because the specifications differ; everything else is
+shared. `scripts/check-plugin-package.sh` checks the package against both
+specifications, so "it loads in either client" is verified rather than
+claimed.
+
+**The package carries its own binary.** A bare `command` name is resolved
+by the client's platform search rules, which means it depends on the
+client's `PATH` — and a host that launches a subprocess with a minimal
+environment has no `PATH` entry for it. A plugin-relative `./bin/x`
+does not have that dependency. This is not theoretical: the connector
+failed to start under orcli's client, which passes exactly `{"PATH=..."}`,
+and the fix was to give the package its own copy of the binary.
+
+`plugins/apiary-state/` is gone. The one package is
+`plugins/apiary-mcp-connector/`.
 
 ### 2. The plugin adds a SKILL, and the skill's value is mostly in what it forbids
 
@@ -106,9 +129,17 @@ report the failure as `Unavailable`, which names neither the real cause nor
 the remedy. A file is the one channel that does not depend on the host's
 variable handling.
 
-**`.mcp.json` therefore declares no `env` block at all.** Declaring one
-invites exactly the failure above, and a block that expands correctly on
-one host and not another is worse than one that is absent.
+**Neither `.mcp.json` nor `mcp.json` declares an `env` block at all.**
+Declaring one invites exactly the failure above, and a block that expands
+correctly on one host and not another is worse than one that is absent.
+
+**The settings file is found without `$HOME`.** A client that launches a
+subprocess with a minimal environment may set neither `$HOME` nor
+`PATH`, and `os.UserHomeDir` reads `$HOME`, so the connector consults the
+passwd database when `$HOME` is absent. It also honours
+`$XDG_CONFIG_HOME`, which is the mechanism every Linux and BSD client
+already understands, so a client can point the connector at its own
+configuration directory without knowing anything about Apiary.
 
 The connector treats an unexpanded `${...}` placeholder in the environment
 as unset rather than as a value, so a host that passes one through verbatim
@@ -155,8 +186,7 @@ installed it, and would compile the same source twice.
   environment at all, which removes a class of plugin-host failure. It also
   means an API key can live in a file on disk, so the permission check is
   load-bearing rather than a nicety.
-- A host that installs both packages gets two MCP servers named `apiary`.
-  This is documented in both READMEs rather than prevented by the code,
-  because the two packages are for different hosts and a host that
-  understands both formats is exactly the case where the operator wants
-  to choose one.
+- The package satisfies two specifications at once, so a change to either
+  one's requirements can break loading in the other client.
+  `scripts/check-plugin-package.sh` is what catches that, and
+  `make plugin-package` runs it.

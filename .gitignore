@@ -35,6 +35,11 @@ profile.cov
 # it does for the ones above.
 /apiary-mcp
 
+# The plugin package carries its own copy of the connector, so that it
+# works for a client that has nothing on its PATH. It is a build
+# product - `make plugin-package` produces it - not repository content.
+/plugins/apiary-mcp-connector/bin/
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
