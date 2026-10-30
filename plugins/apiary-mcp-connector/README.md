@@ -37,6 +37,14 @@ Set these environment variables for the process that launches MCP plugins:
 | `APIARY_MANAGER_CA` | Optional PEM CA bundle when the system trust store is insufficient |
 | `APIARY_MANAGER_SERVER_NAME` | Optional TLS DNS name when it differs from the address host |
 
+A host that cannot pass an environment to the connector can put the same
+settings in a file instead. The connector reads `~/.config/apiary/mcp.env`
+when the environment leaves a setting unset, one `KEY=value` per line.
+`APIARY_MCP_ENV_FILE` points it at a different path. A missing file is not an
+error. A file that is readable by group or others is refused, because it may
+hold the API key. The environment wins over the file, and an unexpanded
+`${...}` placeholder counts as unset rather than as a value.
+
 The connector requires TLS and validates the server certificate. It never
 falls back to plaintext. Each tool call has a 10-second timeout.
 
@@ -51,6 +59,10 @@ The binary also serves Streamable HTTP with `-transport http`. It binds only to
 loopback, requires `APIARY_MCP_TOKEN` (at least 32 characters) as a bearer
 token, and must sit behind HTTPS and a private tunnel or authenticated reverse
 proxy. This change does not verify any hosted client connecting to it.
+
+In HTTP mode the settings file is not consulted. A connector running as a
+daemon takes its configuration from the environment alone, which is the
+contract the rc script on a Comb implements.
 
 ## Tests
 

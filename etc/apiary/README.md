@@ -405,12 +405,32 @@ not use the service at all — it launches the binary itself.
 | `APIARY_MCP_TRANSPORT` | `stdio` or `http`. |
 | `APIARY_MCP_LISTEN` | The HTTP listen address. **Loopback only.** |
 | `APIARY_MCP_TOKEN` | The HTTP bearer token. **Required in http mode**, and at least 32 characters. |
+| `APIARY_MCP_ENV_FILE` | The path of a settings file to read for any setting the environment leaves unset. Defaults to `~/.config/apiary/mcp.env`. |
 
 `APIARY_API_KEY` and `APIARY_MCP_TOKEN` are **secrets**. For the
 service they come from `/usr/local/etc/apiary/mcp-secrets` (see above);
 for a client launching the binary directly they come from the
 environment. Either way they must never be written into a file that is
 committed, or into `rc.conf` on a shared host.
+
+### The settings file, and who reads it
+
+A client that launches the binary directly as a subprocess may have no
+way to pass it an environment — a plugin host is the case that matters,
+because a host that does not expand `${...}` placeholders hands the
+connector the placeholder text itself. For **stdio** the connector
+therefore falls back to a settings file, `~/.config/apiary/mcp.env` by
+default and `APIARY_MCP_ENV_FILE` otherwise, holding one `KEY=value`
+per line. The environment wins over the file, an unexpanded `${...}`
+placeholder counts as unset rather than as a value, a missing file is
+not an error, and a file readable by group or others is refused because
+it may hold the API key.
+
+The **service** does not read that file. It runs in http mode, where
+the connector takes its configuration from the environment alone; the
+rc script's own secrets file is the service's contract, and a second
+undocumented source of configuration in root's home directory would be
+one more thing to keep in step.
 
 ### Enabling it
 
