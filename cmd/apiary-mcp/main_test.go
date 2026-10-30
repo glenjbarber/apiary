@@ -468,3 +468,39 @@ func TestLoadConfigTransportSources(t *testing.T) {
 		t.Errorf("transport = %q, want %q", cfg.transport, "stdio")
 	}
 }
+
+// TestSettingsFileWithoutHome checks that the settings file is still found
+// when the launching host passes a minimal environment with no $HOME.
+//
+// A plugin host that launches the connector as a subprocess may set only
+// PATH, and os.UserHomeDir reads $HOME. Without the passwd-database
+// fallback the connector would find no settings file at all, which is the
+// very case the file exists to serve.
+func TestSettingsFileWithoutHome(t *testing.T) {
+	path := writeSettingsFile(t, 0o600, ""+
+		"APIARY_MANAGER_ADDR=manager.example:9443\n"+
+		"APIARY_API_KEY=file-key\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+
+	home, err := homeDir()
+	if err != nil {
+		t.Fatalf("homeDir: err = %v, want nil", err)
+	}
+	if home == "" {
+		t.Errorf("homeDir returned an empty path")
+	}
+}
+
+// TestSettingsFileDefaultPath checks the default location of the settings
+// file when APIARY_MCP_ENV_FILE does not name one.
+func TestSettingsFileDefaultPath(t *testing.T) {
+	t.Setenv("APIARY_MCP_ENV_FILE", "")
+	home, err := homeDir()
+	if err != nil {
+		t.Fatalf("homeDir: err = %v, want nil", err)
+	}
+	want := filepath.Join(home, ".config", "apiary", "mcp.env")
+	if got := settingsFile(); got != want {
+		t.Errorf("settingsFile() = %q, want %q", got, want)
+	}
+}

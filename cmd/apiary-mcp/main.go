@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -110,11 +111,32 @@ func settingsFile() string {
 	if path := os.Getenv("APIARY_MCP_ENV_FILE"); path != "" {
 		return path
 	}
-	home, err := os.UserHomeDir()
+	home, err := homeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, ".config", "apiary", "mcp.env")
+}
+
+// homeDir finds the invoking user's home directory.
+//
+// os.UserHomeDir reads $HOME, and a host that launches the connector as a
+// subprocess may not set it: a plugin host that passes a minimal
+// environment is the very case this file exists to serve. So when $HOME is
+// absent the passwd database is consulted instead, and the connector still
+// finds its settings.
+func homeDir() (string, error) {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home, nil
+	}
+	current, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	if current.HomeDir == "" {
+		return "", errors.New("no home directory for the current user")
+	}
+	return current.HomeDir, nil
 }
 
 // readSettingsFile parses KEY=value lines. A missing file is not an error:
