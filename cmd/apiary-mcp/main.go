@@ -98,8 +98,13 @@ func main() {
 }
 
 // settingsFile is the path of the settings file consulted for any setting
-// the environment leaves unset. APIARY_MCP_ENV_FILE overrides it, and the
-// default is ~/.config/apiary/mcp.env.
+// the environment leaves unset.
+//
+// APIARY_MCP_ENV_FILE overrides it. Otherwise it is $XDG_CONFIG_HOME/apiary/
+// mcp.env, or ~/.config/apiary/mcp.env when XDG_CONFIG_HOME is unset.
+// XDG_CONFIG_HOME is the mechanism every Linux and BSD client already
+// honours, so a plugin host can point the connector at its own config
+// directory without knowing anything about Apiary.
 //
 // The file exists because a plugin host cannot always pass an environment to
 // the process it launches. A Claude Code plugin's .mcp.json may declare an
@@ -110,6 +115,9 @@ func main() {
 func settingsFile() string {
 	if path := os.Getenv("APIARY_MCP_ENV_FILE"); path != "" {
 		return path
+	}
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "apiary", "mcp.env")
 	}
 	home, err := homeDir()
 	if err != nil {

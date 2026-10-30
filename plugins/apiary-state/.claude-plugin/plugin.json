@@ -1,6 +1,0 @@
-{
-  "name": "apiary-state",
-  "version": "0.1.0",
-  "description": "Read-only Apiary cluster state: VM and jail inventory and cluster health, through the Apiary read-only MCP connector.",
-  "author": { "name": "Apiary" }
-}

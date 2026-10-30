@@ -504,3 +504,15 @@ func TestSettingsFileDefaultPath(t *testing.T) {
 		t.Errorf("settingsFile() = %q, want %q", got, want)
 	}
 }
+
+// TestSettingsFileUsesXDGConfigHome checks that XDG_CONFIG_HOME overrides
+// the default location, so a client can point the connector at its own
+// config directory without knowing anything about Apiary.
+func TestSettingsFileUsesXDGConfigHome(t *testing.T) {
+	t.Setenv("APIARY_MCP_ENV_FILE", "")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
+	want := filepath.Join("/xdg/config", "apiary", "mcp.env")
+	if got := settingsFile(); got != want {
+		t.Errorf("settingsFile() = %q, want %q", got, want)
+	}
+}

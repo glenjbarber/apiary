@@ -3,7 +3,7 @@
   "mcpServers": {
     "apiary": {
       "type": "stdio",
-      "command": "apiary-mcp",
+      "command": "./bin/apiary-mcp",
       "args": []
     }
   }

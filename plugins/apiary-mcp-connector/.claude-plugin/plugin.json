@@ -1,0 +1,21 @@
+{
+  "name": "apiary-mcp-connector",
+  "displayName": "Apiary MCP Connector",
+  "version": "0.2.0",
+  "description": "Read-only Apiary cluster state: VM and jail inventory and cluster health, through the Apiary read-only MCP connector.",
+  "author": {
+    "name": "Apiary"
+  },
+  "homepage": "https://github.com/glenjbarber/apiary",
+  "repository": "https://github.com/glenjbarber/apiary",
+  "license": "MIT",
+  "keywords": [
+    "apiary",
+    "infrastructure",
+    "cluster",
+    "inventory",
+    "health",
+    "bhyve",
+    "jail"
+  ]
+}

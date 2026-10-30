@@ -125,6 +125,22 @@ build:
 		$(GO_BUILD) -ldflags "$$ldflags" -o $$S ./cmd/$$S ;\
 	done
 
+# The plugin package carries its own copy of the connector, because the
+# package has to work for ANY client and cannot depend on the client
+# having the binary on its PATH. It is built with the same stamping
+# contract as every other binary here, so a packaged connector reports
+# the same identity as an installed one.
+#
+# The binary is NOT committed: it is a build product, and the package is
+# produced by this target rather than checked in.
+.PHONY: plugin-package
+plugin-package:
+	set -e; \
+	ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' VERSION='$(VERSION)' ${LDFLAGS_SH}` ; \
+	$(GO_BUILD) -ldflags "$$ldflags" -o plugins/apiary-mcp-connector/bin/apiary-mcp ./cmd/apiary-mcp ;\
+	chmod +x plugins/apiary-mcp-connector/bin/apiary-mcp ;\
+	sh scripts/check-plugin-package.sh
+
 # Mirrors .github/workflows/go-ci.yml's own four steps exactly (same
 # order, same commands), so a failure here is a failure there - run
 # this before every commit rather than finding out from CI.
