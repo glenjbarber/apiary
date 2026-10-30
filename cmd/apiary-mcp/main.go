@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
@@ -16,11 +17,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -53,7 +56,7 @@ type config struct {
 }
 
 func main() {
-	transport := flag.String("transport", env("APIARY_MCP_TRANSPORT", "stdio"), "MCP transport: stdio or http")
+	transport := flag.String("transport", "", "MCP transport: stdio or http")
 	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
 
@@ -93,25 +96,137 @@ func main() {
 	}
 }
 
-func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// settingsFile is the path of the settings file consulted for any setting
+// the environment leaves unset. APIARY_MCP_ENV_FILE overrides it, and the
+// default is ~/.config/apiary/mcp.env.
+//
+// The file exists because a plugin host cannot always pass an environment to
+// the process it launches. A Claude Code plugin's .mcp.json may declare an
+// env block, but a host that does not expand ${...} placeholders hands the
+// connector the literal placeholder text instead of the value, and an
+// explicit env block then also overrides anything inherited. A file is the
+// one channel that does not depend on the host's variable handling.
+func settingsFile() string {
+	if path := os.Getenv("APIARY_MCP_ENV_FILE"); path != "" {
+		return path
 	}
-	return fallback
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "apiary", "mcp.env")
 }
 
+// readSettingsFile parses KEY=value lines. A missing file is not an error:
+// the settings file is a fallback, not a requirement, and a host that
+// configures everything through the environment must keep working.
+//
+// The file may hold an API key, so it is refused unless it is readable by
+// its owner alone. A file that group or others can read is a credential
+// that has already leaked.
+func readSettingsFile(path string) (map[string]string, error) {
+	settings := map[string]string{}
+	if path == "" {
+		return settings, nil
+	}
+	file, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return settings, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("%s must not be readable by group or others", path)
+	}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		settings[strings.TrimSpace(key)] = value
+	}
+	return settings, scanner.Err()
+}
+
+// setting prefers the environment and falls back to the settings file. An
+// empty value, or one that is still an unexpanded ${...} placeholder, counts
+// as unset: a host that passed the placeholder through verbatim did not
+// supply a setting, and treating it as one would dial a host named
+// "${APIARY_MANAGER_ADDR}".
+func setting(file map[string]string, key string) string {
+	value := os.Getenv(key)
+	if value == "" || strings.HasPrefix(value, "${") {
+		return file[key]
+	}
+	return value
+}
+
+// loadConfig resolves the connector's settings.
+//
+// The settings file is consulted only for a connector running as a
+// subprocess under stdio. A connector running as a daemon is a service, and
+// a service on this host already has a secret-delivery contract of its own:
+// the rc script reads /usr/local/etc/apiary/mcp-secrets and names every
+// setting on the command line. Letting a root-owned daemon also pick up a
+// file in root's home directory would give that deployment a second,
+// undocumented source of configuration, and ADR-0162 says the connector's
+// configuration comes from the environment.
+//
+// The transport is resolved first, because it decides whether the file is
+// consulted at all: the flag wins, then the environment, and only if
+// neither names one is the file read to find out.
 func loadConfig(transport string) (config, error) {
+	transport = strings.ToLower(strings.TrimSpace(transport))
+	if transport == "" {
+		transport = strings.ToLower(strings.TrimSpace(os.Getenv("APIARY_MCP_TRANSPORT")))
+	}
+
+	file := map[string]string{}
+	if transport != "http" {
+		settings, err := readSettingsFile(settingsFile())
+		if err != nil {
+			return config{}, fmt.Errorf("reading settings file: %w", err)
+		}
+		file = settings
+		if transport == "" {
+			transport = strings.ToLower(strings.TrimSpace(settings["APIARY_MCP_TRANSPORT"]))
+			if transport == "http" {
+				// The file named HTTP mode, so this is a daemon
+				// deployment after all and the file must not
+				// supply any of the settings.
+				file = map[string]string{}
+			}
+		}
+	}
+	listen := setting(file, "APIARY_MCP_LISTEN")
+	if listen == "" {
+		listen = "127.0.0.1:8787"
+	}
 	cfg := config{
-		managerAddr: strings.TrimSpace(os.Getenv("APIARY_MANAGER_ADDR")),
-		apiKey:      os.Getenv("APIARY_API_KEY"),
-		caFile:      strings.TrimSpace(os.Getenv("APIARY_MANAGER_CA")),
-		serverName:  strings.TrimSpace(os.Getenv("APIARY_MANAGER_SERVER_NAME")),
+		managerAddr: strings.TrimSpace(setting(file, "APIARY_MANAGER_ADDR")),
+		apiKey:      setting(file, "APIARY_API_KEY"),
+		caFile:      strings.TrimSpace(setting(file, "APIARY_MANAGER_CA")),
+		serverName:  strings.TrimSpace(setting(file, "APIARY_MANAGER_SERVER_NAME")),
 		transport:   strings.ToLower(strings.TrimSpace(transport)),
-		listen:      env("APIARY_MCP_LISTEN", "127.0.0.1:8787"),
-		mcpToken:    os.Getenv("APIARY_MCP_TOKEN"),
+		listen:      listen,
+		mcpToken:    setting(file, "APIARY_MCP_TOKEN"),
+	}
+	if cfg.transport == "" {
+		cfg.transport = "stdio"
 	}
 	if cfg.managerAddr == "" || cfg.apiKey == "" {
-		return config{}, errors.New("APIARY_MANAGER_ADDR and APIARY_API_KEY are required")
+		return config{}, errors.New("APIARY_MANAGER_ADDR and APIARY_API_KEY are required (environment or settings file)")
 	}
 	if cfg.transport != "stdio" && cfg.transport != "http" {
 		return config{}, fmt.Errorf("unsupported MCP transport %q (use stdio or http)", cfg.transport)

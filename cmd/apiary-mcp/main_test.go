@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -245,6 +247,10 @@ func TestBearerGuardRejectsWrongToken(t *testing.T) {
 }
 
 func TestLoadConfigRules(t *testing.T) {
+	// Point the settings file at a path that does not exist, so the test
+	// does not pick up a real ~/.config/apiary/mcp.env on the machine
+	// running it. A missing file is not an error.
+	t.Setenv("APIARY_MCP_ENV_FILE", filepath.Join(t.TempDir(), "absent.env"))
 	t.Setenv("APIARY_MANAGER_ADDR", "manager.example:9443")
 	t.Setenv("APIARY_API_KEY", "key")
 	t.Setenv("APIARY_MCP_TOKEN", "short")
@@ -264,5 +270,201 @@ func TestLoadConfigRules(t *testing.T) {
 	}
 	if _, err := loadConfig("bogus"); err == nil {
 		t.Errorf("unknown transport: err = nil, want an error")
+	}
+}
+
+// writeSettingsFile writes a settings file with the given mode and returns
+// its path.
+func writeSettingsFile(t *testing.T, mode os.FileMode, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mcp.env")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write settings file: %v", err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("chmod settings file: %v", err)
+	}
+	return path
+}
+
+// TestLoadConfigFallsBackToSettingsFile checks that a setting the
+// environment leaves unset is taken from the settings file.
+func TestLoadConfigFallsBackToSettingsFile(t *testing.T) {
+	path := writeSettingsFile(t, 0o600, ""+
+		"# a comment\n"+
+		"\n"+
+		"APIARY_MANAGER_ADDR=manager.example:9443\n"+
+		"APIARY_API_KEY=file-key\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+	t.Setenv("APIARY_MANAGER_ADDR", "")
+	t.Setenv("APIARY_API_KEY", "")
+
+	cfg, err := loadConfig("stdio")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.managerAddr != "manager.example:9443" {
+		t.Errorf("managerAddr = %q, want %q", cfg.managerAddr, "manager.example:9443")
+	}
+	if cfg.apiKey != "file-key" {
+		t.Errorf("apiKey = %q, want %q", cfg.apiKey, "file-key")
+	}
+}
+
+// TestLoadConfigEnvironmentWins checks that the environment takes
+// precedence over the settings file.
+func TestLoadConfigEnvironmentWins(t *testing.T) {
+	path := writeSettingsFile(t, 0o600, ""+
+		"APIARY_MANAGER_ADDR=file.example:9443\n"+
+		"APIARY_API_KEY=file-key\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+	t.Setenv("APIARY_MANAGER_ADDR", "env.example:9443")
+	t.Setenv("APIARY_API_KEY", "env-key")
+
+	cfg, err := loadConfig("stdio")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.managerAddr != "env.example:9443" {
+		t.Errorf("managerAddr = %q, want %q", cfg.managerAddr, "env.example:9443")
+	}
+	if cfg.apiKey != "env-key" {
+		t.Errorf("apiKey = %q, want %q", cfg.apiKey, "env-key")
+	}
+}
+
+// TestLoadConfigTreatsPlaceholderAsUnset checks that an unexpanded
+// ${...} placeholder is treated as unset rather than as a value. This is
+// the case that broke the plugin: the host passed the placeholder through
+// verbatim, and the connector dialled a host named "${APIARY_MANAGER_ADDR}".
+func TestLoadConfigTreatsPlaceholderAsUnset(t *testing.T) {
+	path := writeSettingsFile(t, 0o600, ""+
+		"APIARY_MANAGER_ADDR=file.example:9443\n"+
+		"APIARY_API_KEY=file-key\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+	t.Setenv("APIARY_MANAGER_ADDR", "${APIARY_MANAGER_ADDR}")
+	t.Setenv("APIARY_API_KEY", "${APIARY_API_KEY}")
+
+	cfg, err := loadConfig("stdio")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.managerAddr != "file.example:9443" {
+		t.Errorf("managerAddr = %q, want %q", cfg.managerAddr, "file.example:9443")
+	}
+	if cfg.apiKey != "file-key" {
+		t.Errorf("apiKey = %q, want %q", cfg.apiKey, "file-key")
+	}
+}
+
+// TestLoadConfigRefusesWorldReadableSettingsFile checks that a settings
+// file any group or other can read is refused. It may hold an API key.
+func TestLoadConfigRefusesWorldReadableSettingsFile(t *testing.T) {
+	for _, mode := range []os.FileMode{0o640, 0o644, 0o604, 0o666} {
+		path := writeSettingsFile(t, mode, ""+
+			"APIARY_MANAGER_ADDR=manager.example:9443\n"+
+			"APIARY_API_KEY=file-key\n")
+		t.Setenv("APIARY_MCP_ENV_FILE", path)
+		t.Setenv("APIARY_MANAGER_ADDR", "")
+		t.Setenv("APIARY_API_KEY", "")
+
+		if _, err := loadConfig("stdio"); err == nil {
+			t.Errorf("mode %04o: err = nil, want an error", mode)
+		}
+	}
+}
+
+// TestLoadConfigMissingSettingsFileIsNotAnError checks that a host that
+// configures everything through the environment keeps working when no
+// settings file exists.
+func TestLoadConfigMissingSettingsFileIsNotAnError(t *testing.T) {
+	t.Setenv("APIARY_MCP_ENV_FILE", filepath.Join(t.TempDir(), "absent.env"))
+	t.Setenv("APIARY_MANAGER_ADDR", "manager.example:9443")
+	t.Setenv("APIARY_API_KEY", "key")
+
+	if _, err := loadConfig("stdio"); err != nil {
+		t.Errorf("loadConfig: err = %v, want nil", err)
+	}
+}
+
+// TestLoadConfigRequiresManagerAddrAndAPIKey checks the refusal when
+// neither the environment nor the settings file supplies the two required
+// settings.
+func TestLoadConfigRequiresManagerAddrAndAPIKey(t *testing.T) {
+	t.Setenv("APIARY_MCP_ENV_FILE", filepath.Join(t.TempDir(), "absent.env"))
+	t.Setenv("APIARY_MANAGER_ADDR", "")
+	t.Setenv("APIARY_API_KEY", "")
+
+	if _, err := loadConfig("stdio"); err == nil {
+		t.Errorf("err = nil, want an error")
+	}
+}
+
+// TestLoadConfigHTTPModeIgnoresSettingsFile checks that the settings file
+// is not consulted in HTTP mode. A connector running as a daemon has a
+// secret-delivery contract of its own, and ADR-0162 says its configuration
+// comes from the environment.
+func TestLoadConfigHTTPModeIgnoresSettingsFile(t *testing.T) {
+	path := writeSettingsFile(t, 0o644, ""+
+		"APIARY_MANAGER_ADDR=file.example:9443\n"+
+		"APIARY_API_KEY=file-key\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+	t.Setenv("APIARY_MANAGER_ADDR", "env.example:9443")
+	t.Setenv("APIARY_API_KEY", "env-key")
+	t.Setenv("APIARY_MCP_TOKEN", "0123456789abcdef0123456789abcdef")
+
+	// The file is world-readable here, so reading it would be an error.
+	// In HTTP mode it is not read at all, so this must succeed.
+	cfg, err := loadConfig("http")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.managerAddr != "env.example:9443" {
+		t.Errorf("managerAddr = %q, want %q", cfg.managerAddr, "env.example:9443")
+	}
+}
+
+// TestLoadConfigTransportSources checks where the transport comes from:
+// the flag wins, then the environment, then the settings file, then stdio.
+func TestLoadConfigTransportSources(t *testing.T) {
+	path := writeSettingsFile(t, 0o600, ""+
+		"APIARY_MANAGER_ADDR=file.example:9443\n"+
+		"APIARY_API_KEY=file-key\n"+
+		"APIARY_MCP_TRANSPORT=http\n")
+	t.Setenv("APIARY_MCP_ENV_FILE", path)
+	t.Setenv("APIARY_MANAGER_ADDR", "")
+	t.Setenv("APIARY_API_KEY", "")
+	t.Setenv("APIARY_MCP_TRANSPORT", "")
+
+	// Nothing names a transport but the file, and the file says http.
+	// That makes this a daemon deployment, so the file supplies no
+	// settings and the required ones are missing.
+	if _, err := loadConfig(""); err == nil {
+		t.Errorf("err = nil, want an error")
+	}
+
+	// The environment names http, with the required settings present.
+	t.Setenv("APIARY_MCP_TRANSPORT", "http")
+	t.Setenv("APIARY_MANAGER_ADDR", "env.example:9443")
+	t.Setenv("APIARY_API_KEY", "env-key")
+	t.Setenv("APIARY_MCP_TOKEN", "0123456789abcdef0123456789abcdef")
+	cfg, err := loadConfig("")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.transport != "http" {
+		t.Errorf("transport = %q, want %q", cfg.transport, "http")
+	}
+	if cfg.managerAddr != "env.example:9443" {
+		t.Errorf("managerAddr = %q, want %q", cfg.managerAddr, "env.example:9443")
+	}
+
+	// The flag wins over the environment.
+	cfg, err = loadConfig("stdio")
+	if err != nil {
+		t.Fatalf("loadConfig: err = %v, want nil", err)
+	}
+	if cfg.transport != "stdio" {
+		t.Errorf("transport = %q, want %q", cfg.transport, "stdio")
 	}
 }

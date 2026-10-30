@@ -83,15 +83,53 @@ The last two matter most. A read-only view of infrastructure invites the
 model to suggest remediation, and the honest report of "the check did not
 answer" is very different from "the node is down".
 
-### 3. Credentials come from the environment, never from the plugin
+### 3. Credentials come from the environment or a settings file, never from the plugin
 
-`.mcp.json` passes `APIARY_MANAGER_ADDR` and `APIARY_API_KEY` through
-from the launching environment. The API key is a real credential, so it
-is never committed, and the README says so. The connector requires TLS
-to ManagerService and verifies the certificate, so the trust anchor is
-the operator's business too: `APIARY_MANAGER_CA` and
-`APIARY_MANAGER_SERVER_NAME` are read by the connector itself, and the
-README points at both.
+The API key is a real credential, so it is never committed, and the README
+says so. The connector requires TLS to ManagerService and verifies the
+certificate, so the trust anchor is the operator's business too:
+`APIARY_MANAGER_CA` and `APIARY_MANAGER_SERVER_NAME` are read by the
+connector itself, and the README points at both.
+
+The connector reads its settings from the environment, and falls back to a
+settings file for any setting the environment leaves unset. The file is
+`~/.config/apiary/mcp.env` by default, and `APIARY_MCP_ENV_FILE` overrides
+the path. It holds one `KEY=value` per line.
+
+**The file exists because a plugin host cannot reliably pass an
+environment.** An `.mcp.json` may declare an `env` block, but a host that
+does not expand `${...}` placeholders hands the connector the placeholder
+text itself, and an explicit `env` block then also overrides whatever was
+inherited, so the operator's own exported variables cannot fix it. The
+connector would dial a host literally named `${APIARY_MANAGER_ADDR}` and
+report the failure as `Unavailable`, which names neither the real cause nor
+the remedy. A file is the one channel that does not depend on the host's
+variable handling.
+
+**`.mcp.json` therefore declares no `env` block at all.** Declaring one
+invites exactly the failure above, and a block that expands correctly on
+one host and not another is worse than one that is absent.
+
+The connector treats an unexpanded `${...}` placeholder in the environment
+as unset rather than as a value, so a host that passes one through verbatim
+falls back to the file instead of dialling a host by that name. This is a
+backstop, not the design: the design is that the block is absent.
+
+The environment wins over the file, so an operator who exports the
+variables still overrides what the file says. A file that group or others
+can read is refused, because it may hold the API key; a missing file is not
+an error, so a host that configures everything through the environment
+keeps working.
+
+**The file is used for the stdio transport only.** A connector running as a
+daemon under HTTP mode takes its configuration from the environment alone.
+That is not a distinction without a difference: a daemon on a Comb already
+has a secret-delivery contract of its own, and the rc script implements it
+by reading `/usr/local/etc/apiary/mcp-secrets` and naming every setting on
+the command line. Letting a root-owned daemon also pick up a file in root's
+home directory would give that deployment a second, undocumented source of
+configuration, and ADR-0162 says the connector's configuration comes from
+the environment.
 
 ### 4. The build step stays explicit
 
@@ -113,6 +151,10 @@ installed it, and would compile the same source twice.
 - The two packages in `plugins/` must be kept in step about the
   connector's environment variables. When `cmd/apiary-mcp` gains a
   setting, both READMEs have to name it.
+- A connector launched as a subprocess can now be configured without any
+  environment at all, which removes a class of plugin-host failure. It also
+  means an API key can live in a file on disk, so the permission check is
+  load-bearing rather than a nicety.
 - A host that installs both packages gets two MCP servers named `apiary`.
   This is documented in both READMEs rather than prevented by the code,
   because the two packages are for different hosts and a host that
