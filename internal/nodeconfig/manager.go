@@ -395,6 +395,19 @@ type Config struct {
 	// default.
 	ProxmoxDiscoveryInterval time.Duration `json:"proxmox_discovery_interval,omitempty"`
 
+	// ExternalNodeStorePath is where ADR-0191's ENROLLMENT store
+	// lives: the record of which external hosts this Colony has
+	// admitted to its reporting domain.
+	//
+	// It is a PATH, and the file it names is root-owned and mode
+	// 0600, because it records which external hosts are trusted. It
+	// sits beside the join authorization file, which is the other
+	// root-owned, operator-authored artifact an enrollment depends
+	// on.
+	//
+	// Empty means the default, /usr/local/etc/apiary/external-nodes.json.
+	ExternalNodeStorePath string `json:"external_node_store_path,omitempty"`
+
 	// SylveDiscoveryEnabled turns the Sylve discovery provider on.
 	SylveDiscoveryEnabled bool `json:"sylve_discovery_enabled,omitempty"`
 

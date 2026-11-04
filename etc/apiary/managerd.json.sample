@@ -63,5 +63,7 @@
   "sylve_discovery_url": "",
   "sylve_discovery_token_file": "",
   "sylve_discovery_ca_file": "",
-  "sylve_discovery_interval": 0
+  "sylve_discovery_interval": 0,
+
+  "external_node_store_path": ""
 }

@@ -19,32 +19,34 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftInternal_Apply_FullMethodName                            = "/apiary.internal.v1.RaftInternal/Apply"
-	RaftInternal_Status_FullMethodName                           = "/apiary.internal.v1.RaftInternal/Status"
-	RaftInternal_AddVoter_FullMethodName                         = "/apiary.internal.v1.RaftInternal/AddVoter"
-	RaftInternal_RemoveServer_FullMethodName                     = "/apiary.internal.v1.RaftInternal/RemoveServer"
-	RaftInternal_GetVM_FullMethodName                            = "/apiary.internal.v1.RaftInternal/GetVM"
-	RaftInternal_ListVMs_FullMethodName                          = "/apiary.internal.v1.RaftInternal/ListVMs"
-	RaftInternal_GetNetwork_FullMethodName                       = "/apiary.internal.v1.RaftInternal/GetNetwork"
-	RaftInternal_ListNetworks_FullMethodName                     = "/apiary.internal.v1.RaftInternal/ListNetworks"
-	RaftInternal_ListVMsLocal_FullMethodName                     = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
-	RaftInternal_ListNetworksLocal_FullMethodName                = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
-	RaftInternal_ValidateAPIKeyHash_FullMethodName               = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
-	RaftInternal_ListAPIKeys_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
-	RaftInternal_GetJail_FullMethodName                          = "/apiary.internal.v1.RaftInternal/GetJail"
-	RaftInternal_ListJails_FullMethodName                        = "/apiary.internal.v1.RaftInternal/ListJails"
-	RaftInternal_ListJailsLocal_FullMethodName                   = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
-	RaftInternal_ExportState_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ExportState"
-	RaftInternal_GetPendingJoinRequestLocal_FullMethodName       = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
-	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
-	RaftInternal_GetRestartLeaseStateLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
-	RaftInternal_GetColonyJoinWindowLocal_FullMethodName         = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
-	RaftInternal_GetColonyDiskSizeLocal_FullMethodName           = "/apiary.internal.v1.RaftInternal/GetColonyDiskSizeLocal"
-	RaftInternal_ListTrustedPeersLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
-	RaftInternal_ListCertificateReservationsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListCertificateReservationsLocal"
-	RaftInternal_GetAuthorizationUse_FullMethodName              = "/apiary.internal.v1.RaftInternal/GetAuthorizationUse"
-	RaftInternal_GetColonyUpdateStateLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
-	RaftInternal_StepAsideForRestartLocal_FullMethodName         = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
+	RaftInternal_Apply_FullMethodName                               = "/apiary.internal.v1.RaftInternal/Apply"
+	RaftInternal_Status_FullMethodName                              = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_AddVoter_FullMethodName                            = "/apiary.internal.v1.RaftInternal/AddVoter"
+	RaftInternal_RemoveServer_FullMethodName                        = "/apiary.internal.v1.RaftInternal/RemoveServer"
+	RaftInternal_GetVM_FullMethodName                               = "/apiary.internal.v1.RaftInternal/GetVM"
+	RaftInternal_ListVMs_FullMethodName                             = "/apiary.internal.v1.RaftInternal/ListVMs"
+	RaftInternal_GetNetwork_FullMethodName                          = "/apiary.internal.v1.RaftInternal/GetNetwork"
+	RaftInternal_ListNetworks_FullMethodName                        = "/apiary.internal.v1.RaftInternal/ListNetworks"
+	RaftInternal_ListVMsLocal_FullMethodName                        = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
+	RaftInternal_ListNetworksLocal_FullMethodName                   = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
+	RaftInternal_ValidateAPIKeyHash_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
+	RaftInternal_ListAPIKeys_FullMethodName                         = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
+	RaftInternal_GetJail_FullMethodName                             = "/apiary.internal.v1.RaftInternal/GetJail"
+	RaftInternal_ListJails_FullMethodName                           = "/apiary.internal.v1.RaftInternal/ListJails"
+	RaftInternal_ListJailsLocal_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
+	RaftInternal_ExportState_FullMethodName                         = "/apiary.internal.v1.RaftInternal/ExportState"
+	RaftInternal_GetPendingJoinRequestLocal_FullMethodName          = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
+	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
+	RaftInternal_GetPendingExternalEnrollmentLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingExternalEnrollmentLocal"
+	RaftInternal_ListPendingExternalEnrollmentsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingExternalEnrollmentsLocal"
+	RaftInternal_GetRestartLeaseStateLocal_FullMethodName           = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
+	RaftInternal_GetColonyJoinWindowLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
+	RaftInternal_GetColonyDiskSizeLocal_FullMethodName              = "/apiary.internal.v1.RaftInternal/GetColonyDiskSizeLocal"
+	RaftInternal_ListTrustedPeersLocal_FullMethodName               = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
+	RaftInternal_ListCertificateReservationsLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/ListCertificateReservationsLocal"
+	RaftInternal_GetAuthorizationUse_FullMethodName                 = "/apiary.internal.v1.RaftInternal/GetAuthorizationUse"
+	RaftInternal_GetColonyUpdateStateLocal_FullMethodName           = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
+	RaftInternal_StepAsideForRestartLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -151,6 +153,24 @@ type RaftInternalClient interface {
 	// the record onto it regardless.
 	GetPendingJoinRequestLocal(ctx context.Context, in *GetPendingJoinRequestRequest, opts ...grpc.CallOption) (*GetPendingJoinRequestResponse, error)
 	ListPendingJoinRequestsLocal(ctx context.Context, in *ListPendingJoinRequestsRequest, opts ...grpc.CallOption) (*ListPendingJoinRequestsResponse, error)
+	// GetPendingExternalEnrollmentLocal backs ADR-0191's enrollment
+	// half: the read side of the pending enrollment attempt the two
+	// authorizing acts attach to.
+	//
+	// Deliberately NOT leader-only, for the same
+	// GetPendingJoinRequestLocal reason: the attempt is already
+	// raft-replicated, so any node can answer for itself. That is what
+	// lets a second authorizing act presented to a FOLLOWER be recorded
+	// the same way one presented to the leader would be - and the
+	// two-person rule is only meaningful if the two Combs involved do
+	// not have to be the same one.
+	GetPendingExternalEnrollmentLocal(ctx context.Context, in *GetPendingExternalEnrollmentRequest, opts ...grpc.CallOption) (*GetPendingExternalEnrollmentResponse, error)
+	// ListPendingExternalEnrollmentsLocal is the list side of the same
+	// read, and is what lets the second authorizing act find the attempt
+	// the first one created - including when the first act was presented
+	// to a DIFFERENT Colony member, which is the whole point of the
+	// two-person rule.
+	ListPendingExternalEnrollmentsLocal(ctx context.Context, in *ListPendingExternalEnrollmentsRequest, opts ...grpc.CallOption) (*ListPendingExternalEnrollmentsResponse, error)
 	// GetRestartLeaseStateLocal backs the action-preflight restart
 	// guardrail (ADR-0103) - deliberately WITHOUT the leader-only
 	// restriction, the same GetPendingJoinRequestLocal reasoning above:
@@ -448,6 +468,26 @@ func (c *raftInternalClient) ListPendingJoinRequestsLocal(ctx context.Context, i
 	return out, nil
 }
 
+func (c *raftInternalClient) GetPendingExternalEnrollmentLocal(ctx context.Context, in *GetPendingExternalEnrollmentRequest, opts ...grpc.CallOption) (*GetPendingExternalEnrollmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPendingExternalEnrollmentResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetPendingExternalEnrollmentLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListPendingExternalEnrollmentsLocal(ctx context.Context, in *ListPendingExternalEnrollmentsRequest, opts ...grpc.CallOption) (*ListPendingExternalEnrollmentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingExternalEnrollmentsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListPendingExternalEnrollmentsLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRestartLeaseStateResponse)
@@ -632,6 +672,24 @@ type RaftInternalServer interface {
 	// the record onto it regardless.
 	GetPendingJoinRequestLocal(context.Context, *GetPendingJoinRequestRequest) (*GetPendingJoinRequestResponse, error)
 	ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error)
+	// GetPendingExternalEnrollmentLocal backs ADR-0191's enrollment
+	// half: the read side of the pending enrollment attempt the two
+	// authorizing acts attach to.
+	//
+	// Deliberately NOT leader-only, for the same
+	// GetPendingJoinRequestLocal reason: the attempt is already
+	// raft-replicated, so any node can answer for itself. That is what
+	// lets a second authorizing act presented to a FOLLOWER be recorded
+	// the same way one presented to the leader would be - and the
+	// two-person rule is only meaningful if the two Combs involved do
+	// not have to be the same one.
+	GetPendingExternalEnrollmentLocal(context.Context, *GetPendingExternalEnrollmentRequest) (*GetPendingExternalEnrollmentResponse, error)
+	// ListPendingExternalEnrollmentsLocal is the list side of the same
+	// read, and is what lets the second authorizing act find the attempt
+	// the first one created - including when the first act was presented
+	// to a DIFFERENT Colony member, which is the whole point of the
+	// two-person rule.
+	ListPendingExternalEnrollmentsLocal(context.Context, *ListPendingExternalEnrollmentsRequest) (*ListPendingExternalEnrollmentsResponse, error)
 	// GetRestartLeaseStateLocal backs the action-preflight restart
 	// guardrail (ADR-0103) - deliberately WITHOUT the leader-only
 	// restriction, the same GetPendingJoinRequestLocal reasoning above:
@@ -802,6 +860,12 @@ func (UnimplementedRaftInternalServer) GetPendingJoinRequestLocal(context.Contex
 }
 func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListPendingJoinRequestsLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) GetPendingExternalEnrollmentLocal(context.Context, *GetPendingExternalEnrollmentRequest) (*GetPendingExternalEnrollmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPendingExternalEnrollmentLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) ListPendingExternalEnrollmentsLocal(context.Context, *ListPendingExternalEnrollmentsRequest) (*ListPendingExternalEnrollmentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPendingExternalEnrollmentsLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRestartLeaseStateLocal not implemented")
@@ -1172,6 +1236,42 @@ func _RaftInternal_ListPendingJoinRequestsLocal_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetPendingExternalEnrollmentLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPendingExternalEnrollmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetPendingExternalEnrollmentLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetPendingExternalEnrollmentLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetPendingExternalEnrollmentLocal(ctx, req.(*GetPendingExternalEnrollmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListPendingExternalEnrollmentsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingExternalEnrollmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListPendingExternalEnrollmentsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListPendingExternalEnrollmentsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListPendingExternalEnrollmentsLocal(ctx, req.(*ListPendingExternalEnrollmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_GetRestartLeaseStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRestartLeaseStateRequest)
 	if err := dec(in); err != nil {
@@ -1394,6 +1494,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListPendingJoinRequestsLocal",
 			Handler:    _RaftInternal_ListPendingJoinRequestsLocal_Handler,
+		},
+		{
+			MethodName: "GetPendingExternalEnrollmentLocal",
+			Handler:    _RaftInternal_GetPendingExternalEnrollmentLocal_Handler,
+		},
+		{
+			MethodName: "ListPendingExternalEnrollmentsLocal",
+			Handler:    _RaftInternal_ListPendingExternalEnrollmentsLocal_Handler,
 		},
 		{
 			MethodName: "GetRestartLeaseStateLocal",

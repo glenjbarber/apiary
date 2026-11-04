@@ -5,23 +5,35 @@
 **Proposed.** This record designs Apiary's integration with Proxmox as a
 **node discovery and enrollment provider**.
 
-**Implemented 2026-10-29 (discovery only).** The provider exists in
+**Implemented 2026-10-29 (discovery).** The provider exists in
 `internal/proxmoxdiscovery`, the shared provider seam in
 `internal/extdiscovery`, the configuration in `internal/nodeconfig`, and
 the read surface as `ManagerService.GetExternalDiscovery`.
 
-**What is implemented is the DISCOVERY half.** The **enrollment** half -
-mapping a discovered node into Apiary's inventory and enrolling it under
-Apiary's trust and authorization policy - is **not** implemented, and the
-reason is the one this record's Context section establishes: Apiary's
-inventory IS its raft membership, so there is no inventory for a
-discovered Proxmox node to be enrolled into. Building that requires the
-separate external-node store this record describes, and that store does
-not exist yet. See "Implementation Follow-up".
+**Implemented 2026-11-04 (enrollment).** The external-node store is
+`internal/extnodes`, the enrollment path is
+`internal/manager/extenrollment.go`, the replicated authorizing acts are
+`internal/raft/externalenrollment.go`, and the surface is
+`ManagerService.GetExternalEnrollments`,
+`ManagerService.EnrollExternalNode` and
+`ManagerService.RemoveExternalEnrollment`.
 
-The implementation confirmed this record's decisions rather than changing
-them. The one thing it could not settle is the open `Sys.Audit`
-privilege question, which is an owner decision and is unchanged.
+**Both halves are now implemented, and the enrollment half adds no
+voter.** An enrolled external node is a known, operator-approved
+external host in this Colony's reporting domain. It is not a member, it
+holds no vote, and Apiary does not manage its workloads.
+
+One thing this record's text got WRONG, and the implementation
+resolved: it said enrollment "runs through the Colony join window
+because enrollment adds a peer that other Combs must trust", while also
+saying an enrolled node is not a peer at all. Those cannot both be the
+reason. The window is required because of what enrollment DOES grant -
+visibility and association in a Colony-wide reporting domain - not
+because of membership. See "Resolving the tension between the join
+window and the no-membership rule".
+
+The open `Sys.Audit` privilege question is unchanged, and is still an
+owner decision.
 
 Supersedes: None
 Superseded by: None
@@ -352,6 +364,49 @@ external node is a record in Apiary's external-node store; it is not a
 Colony member, it holds no raft vote, and it is not a Comb. It has no
 `managerd` to reconcile against, no bhyve, no ZFS datasets, no cells.
 
+### Resolving the tension between the join window and the no-membership rule
+
+The paragraph above and the one before it pull in opposite directions, and
+the contradiction is resolved here because it is load-bearing rather than
+phrasing.
+
+Enrollment **runs through the Colony join window** and **requires the
+same two distinct authorizations** that a manual Comb join requires. It
+**does not** add a voter, and the enrolled node **is not** a member.
+
+The reconciliation is that the join machinery is two separable things, and
+only one of them is membership:
+
+| | What it is | Used by enrollment? |
+| --- | --- | --- |
+| The **join window** (ADR-0147 Part 4) | A time-bounded, Colony-wide statement that this Colony is accepting new trust relationships right now | **Yes** |
+| The **two-person rule** (ADR-0147 Part 3) | Two distinct API keys, presented to two distinct Combs, from a single-use root-owned entry | **Yes** |
+| **`AddVoter`** | A raft membership change | **No** |
+
+`ApproveJoinRequest` is where those three meet, and its terminal effect
+is `AddVoter`. Enrollment reuses the first two and replaces the third with
+an **external-node enrollment record**.
+
+So an enrollment is gated by exactly the machinery that gates a Comb
+join — a live window, two distinct keys on two distinct Combs, a
+single-use operator-created authorization entry, and the same confirmation
+phrase — and its effect is a record that says "this external host is
+known to this Colony and an operator admitted it", with no vote, no raft
+transport, and nothing to reconcile.
+
+**The window is required because of what enrollment DOES grant**, not
+because of membership. An enrolled external node is a host other Combs
+will report on and associate objects with, so it is a trust relationship
+that must be opened deliberately and must expire. It is not required
+because the node holds a vote - it does not.
+
+A manual Comb join is still the only way to add a **member**. Enrollment
+can never do that, by construction: the enrollment path has no call to
+`AddVoter` and no access to the raft membership command surface. A
+discovered Proxmox node therefore cannot become a raft member through
+any sequence of Apiary operations, and that is a property of the code
+rather than a rule an operator is asked to respect.
+
 **The enrolment trust model is therefore explicit about what it does
 grant.** An enrolled external node is a *known, authenticated,
 operator-approved external host* that Apiary can report on, and that can
@@ -639,15 +694,62 @@ inbound path can reuse the same trust model rather than invent a second.
    and a plaintext base URL - and assert that the provider issues only
    `GET` and never requests a path outside its allowlist.
 
+**The enrollment half, implemented 2026-11-04.**
+
+The store this record describes now exists, in `internal/extnodes`, and
+the enrollment path that uses it is in `internal/manager/extenrollment.go`
+and `internal/raft/externalenrollment.go`.
+
+**What the implementation established:**
+
+1. **The enrollment store** is a LOCAL, root-owned, mode-0600 file at
+   `/usr/local/etc/apiary/external-nodes.json`, beside the join
+   authorization file. It records the admitted hosts, the two
+   authorizing acts that admitted each one, and the provider's own
+   status for it. It is written atomically, because a store that reads
+   as empty after a crash would make every enrolled host look
+   unenrolled.
+
+2. **The AUTHORIZING ACTS are REPLICATED and the enrollment RECORD is
+   NOT**, and the split is deliberate. The two-person rule has to count
+   the same way on every replica and across a leadership change, so the
+   acts live in the FSM. The record is local because a provider
+   credential is a per-host secret and because an enrolled external host
+   is not a Colony fact in the way a member is.
+
+3. **Enrollment is TWO-PHASE.** The first call records one authorizing
+   act and deliberately admits nobody; the response says a second
+   authorization is required. The second call, with a different API key,
+   presented to a different Colony member, completes it. One act can
+   never enroll a host on its own, and one operator can never admit a
+   host on their own either.
+
+4. **The host must have been OBSERVED.** An enrollment of a host
+   discovery never saw is refused by name, because a misspelled name
+   becomes a permanent record that looks exactly like a real one.
+
+5. **A supplied fingerprint is CHECKED against the observed one**, and a
+   disagreement is a refusal showing both values - the same comparison
+   ADR-0147 Part 2 makes for a joiner's advertised fingerprints.
+
+6. **The enrollment adds NO VOTER.** There is no call to `AddVoter`
+   anywhere in the enrollment path, and the FSM exposes no membership
+   command. A discovered Proxmox node cannot become a raft member
+   through any sequence of Apiary operations, and that is a property of
+   the code rather than a rule an operator is asked to respect. The
+   tests assert it.
+
+7. **The confirmation phrases are DISTINCT** from the Colony join's
+   "yes-trust-new-comb" - "yes-enroll-external-node" and
+   "yes-remove-external-node". The three actions are different, and an
+   operator who approved one has not thereby approved the others.
+
 **What still needs establishing:**
 
 - **The `Sys.Audit` privilege question**, which is an owner decision and
   is unchanged by the implementation. The provider works with either
   privilege set; granting `Sys.Audit` on `/` is what makes the cluster
   name available.
-- **The enrollment half**, which requires the separate external-node
-  store this record describes. That store does not exist, and building
-  it is the substantive remaining work.
 - **The minimum supported Proxmox version**, which needs the endpoint
   contract checked against a live installation.
 
