@@ -753,6 +753,28 @@ func (n *Node) ListPendingJoinRequestsLocal() []*internalpb.PendingJoinRequest {
 	return n.fsm.ListPendingJoinRequests()
 }
 
+// GetPendingExternalEnrollmentLocal backs
+// GetPendingExternalEnrollmentLocal - ADR-0191's enrollment half.
+//
+// Deliberately NOT leader-only, for the same GetPendingJoinRequestLocal
+// reason: the attempt is raft-replicated state, and the two-person rule
+// is only meaningful if the second authorizing act can be presented to a
+// DIFFERENT Comb than the first.
+func (n *Node) GetPendingExternalEnrollmentLocal(requestID string) (*internalpb.PendingExternalEnrollment, bool) {
+	return n.fsm.PendingExternalEnrollment(requestID)
+}
+
+// ListPendingExternalEnrollmentsLocal backs
+// ListPendingExternalEnrollmentsLocal - ADR-0191's enrollment half's
+// list side.
+//
+// Deliberately NOT leader-only, for the same reason as the read above:
+// the second authorizing act may be presented to a follower, and it has
+// to be able to find the attempt the first act created.
+func (n *Node) ListPendingExternalEnrollmentsLocal() []*internalpb.PendingExternalEnrollment {
+	return n.fsm.ListPendingExternalEnrollments()
+}
+
 // AuthorizationUse backs GetAuthorizationUse (ADR-0147 Part 3) - the
 // replicated record of which request spent which root-owned
 // authorization entry.

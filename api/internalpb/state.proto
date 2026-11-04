@@ -675,6 +675,26 @@ message Command {
     // instead.
     RecordJoinApproval record_join_approval = 41;
 
+    // RecordExternalEnrollment is ADR-0191's enrollment half: ONE
+    // authorizing act against a pending external enrollment.
+    //
+    // It is the same shape as RecordJoinApproval and for the same
+    // reason - the two-person rule counts DISTINCT acts on DISTINCT
+    // members, and only replicated state can make that count the same
+    // answer on every replica and across a leadership change.
+    //
+    // It resolves nothing. Two of these are what enroll a host.
+    RecordExternalEnrollment record_external_enrollment = 58;
+
+    // CreatePendingExternalEnrollment starts an enrollment attempt. It
+    // is created by the FIRST authorizing act, so that the SECOND act
+    // has something to attach to.
+    CreatePendingExternalEnrollment create_pending_external_enrollment = 60;
+
+    // ResolveExternalEnrollment is the terminal act: the enrollment
+    // happened, or it did not.
+    ResolveExternalEnrollment resolve_external_enrollment = 59;
+
     // VerifyJoinIntroduction/ReissueJoinSecondPin/ConsumeJoinSecondPin
     // are ADR-0147 Part 2's remaining join transitions, and they are
     // raft commands rather than managerd memory for the same reason
@@ -1664,6 +1684,132 @@ message JoinApprovalAttestation {
   string node_id = 2;
 
   int64 at_unix = 3;
+}
+
+// PendingExternalEnrollment is one external host on its way to being
+// enrolled, and the authorizing acts recorded against it.
+//
+// It is a PENDING record: the host is not enrolled until the second
+// authorizing act resolves it. That is the same two-phase shape
+// ADR-0147 Part 3 uses for a Colony join, and it is why the "awaiting
+// second authorization" state is visible rather than implied.
+//
+// It is NOT a PendingJoinRequest and does not become a raft member. It
+// carries no raft_bind_address, because there is nothing to dial and
+// nothing to add.
+message PendingExternalEnrollment {
+  // request_id identifies this enrollment attempt.
+  string request_id = 1;
+
+  // provider is the provider that observed the host ("proxmox",
+  // "sylve").
+  string provider = 2;
+
+  // source_id identifies the provider installation. It is empty for a
+  // provider that does not cluster, which is a fact about the source
+  // rather than a missing value.
+  string source_id = 3;
+
+  // name is the provider's own name for the host.
+  string name = 4;
+
+  // fingerprint is the provider's stable per-node identity anchor,
+  // captured when the enrollment was created. It is what makes a
+  // rename detectable as a conflict rather than silently forking a
+  // record.
+  string fingerprint = 5;
+
+  // provider_status is the provider's own status for the host, verbatim
+  // and unnormalized.
+  string provider_status = 6;
+
+  // requested_at_unix is when the first authorizing act was recorded.
+  int64 requested_at_unix = 7;
+
+  // expires_at_unix is when this attempt stops being completable. It
+  // is bounded, because an enrollment attempt that can sit pending
+  // forever is one that can be completed long after the operator who
+  // started it has forgotten about it.
+  int64 expires_at_unix = 8;
+
+  // status is the attempt's status.
+  ExternalEnrollmentStatus status = 9;
+
+  // approval_1 / approval_2 mirror PendingJoinRequest's own two
+  // fields of the same names - see there for what each one is, and why
+  // two slots rather than one.
+  JoinApprovalAttestation approval_1 = 10;
+  JoinApprovalAttestation approval_2 = 11;
+
+  // window_opened_at_unix mirrors PendingJoinRequest's own field of
+  // the same name. A reopen of the Colony join window invalidates
+  // every attempt created under the previous one.
+  int64 window_opened_at_unix = 12;
+}
+
+// ExternalEnrollmentStatus is an enrollment attempt's status.
+enum ExternalEnrollmentStatus {
+  EXTERNAL_ENROLLMENT_STATUS_UNSPECIFIED = 0;
+
+  // EXTERNAL_ENROLLMENT_STATUS_PENDING means one authorizing act is
+  // recorded and a second is still needed.
+  EXTERNAL_ENROLLMENT_STATUS_PENDING = 1;
+
+  // EXTERNAL_ENROLLMENT_STATUS_ENROLLED means the second authorizing
+  // act completed the enrollment. The host is now a known,
+  // operator-approved external host in this Colony's reporting
+  // domain. It is NOT a member and holds no vote.
+  EXTERNAL_ENROLLMENT_STATUS_ENROLLED = 2;
+
+  // EXTERNAL_ENROLLMENT_STATUS_REJECTED means an operator refused it.
+  EXTERNAL_ENROLLMENT_STATUS_REJECTED = 3;
+
+  // EXTERNAL_ENROLLMENT_STATUS_EXPIRED means the attempt lapsed
+  // before it was completed.
+  EXTERNAL_ENROLLMENT_STATUS_EXPIRED = 4;
+}
+
+// RecordExternalEnrollment records ONE authorizing act against a still-
+// pending external enrollment (ADR-0191's two-person rule) and resolves
+// nothing.
+//
+// It mirrors RecordJoinApproval's own semantics exactly, including the
+// refusal of a second act that uses the same API key or the same Comb,
+// and the refusal of an act with an empty key or node id.
+message RecordExternalEnrollment {
+  // request_id identifies the enrollment attempt.
+  string request_id = 1;
+
+  // key_id is the ApiKey record's own generated id, never key
+  // material.
+  string key_id = 2;
+
+  // node_id is the Comb the authorizing call was presented to.
+  string node_id = 3;
+
+  // at_unix is when the act was recorded.
+  int64 at_unix = 4;
+}
+
+// ResolveExternalEnrollment is the terminal act on an enrollment
+// attempt: it either enrolled the host or refused it.
+message ResolveExternalEnrollment {
+  // request_id identifies the enrollment attempt.
+  string request_id = 1;
+
+  // status is the attempt's terminal status - ENROLLED or REJECTED.
+  ExternalEnrollmentStatus status = 2;
+
+  // enrolled_at_unix is when the enrollment completed.
+  int64 enrolled_at_unix = 3;
+}
+
+// CreatePendingExternalEnrollment starts an enrollment attempt.
+//
+// It is created by the FIRST authorizing act, and it exists so that the
+// SECOND act has something to attach to.
+message CreatePendingExternalEnrollment {
+  PendingExternalEnrollment enrollment = 1;
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if

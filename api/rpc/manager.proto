@@ -243,6 +243,47 @@ service ManagerService {
   // plane owns, and this RPC never implies that Apiary manages it.
   rpc GetExternalDiscovery(GetExternalDiscoveryRequest) returns (GetExternalDiscoveryResponse);
 
+  // GetExternalEnrollments reports the external hosts this Colony has
+  // enrolled.
+  //
+  // An ENROLLED external host is one an operator admitted to this
+  // Colony's reporting domain through two separate authorizing acts.
+  // It is NOT a member: it holds no raft vote, it is not a Comb, and
+  // Apiary does not manage its workloads. This RPC never implies
+  // otherwise.
+  //
+  // Viewer-authorized, the same tier as GetExternalDiscovery: it
+  // reports what was admitted, not a verdict about anything an
+  // operator can change.
+  rpc GetExternalEnrollments(GetExternalEnrollmentsRequest) returns (GetExternalEnrollmentsResponse);
+
+  // EnrollExternalNode admits a discovered external host to this
+  // Colony's reporting domain.
+  //
+  // This is the ENROLLMENT half of ADR-0191, and it is gated by the
+  // same machinery that gates a Colony join: a live Colony join
+  // window (ADR-0147 Part 4), two distinct API keys presented to two
+  // distinct Colony members (ADR-0147 Part 3), a single-use
+  // root-owned authorization entry, and the same confirmation phrase.
+  //
+  // What it does NOT do is the thing a Colony join does: it adds no
+  // voter. The enrolled host is not a member of anything, and the
+  // enrollment path cannot make it one.
+  //
+  // Admin-authorized.
+  rpc EnrollExternalNode(EnrollExternalNodeRequest) returns (EnrollExternalNodeResponse);
+
+  // RemoveExternalEnrollment withdraws an enrollment.
+  //
+  // Removal is always an explicit operator action and is never a
+  // side-effect of a discovery scan. A host that vanished from a
+  // provider's listing is marked absent and kept, because deleting the
+  // record on that evidence destroys the history that makes the
+  // absence diagnosable.
+  //
+  // Admin-authorized.
+  rpc RemoveExternalEnrollment(RemoveExternalEnrollmentRequest) returns (RemoveExternalEnrollmentResponse);
+
   // GetVMConsole reports how to reach a running VM's VNC framebuffer,
   // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
   // this only answers for a VM actually running on *this* node - see
@@ -6105,6 +6146,177 @@ message ExternalDiscoveryResource {
 
   // observed_at is when Apiary last saw this guest.
   int64 observed_at = 9;
+}
+
+// GetExternalEnrollmentsRequest asks for the enrolled external hosts.
+//
+// An empty provider means "every provider".
+message GetExternalEnrollmentsRequest {
+  // provider selects one provider ("proxmox", "sylve"). Empty means
+  // every provider.
+  string provider = 1;
+}
+
+// GetExternalEnrollmentsResponse carries the enrolled external hosts.
+message GetExternalEnrollmentsResponse {
+  // enrollments carries one entry per enrolled host.
+  repeated ExternalNodeEnrollment enrollments = 1;
+
+  // error is set when the report could not be assembled at all.
+  string error = 2;
+}
+
+// ExternalNodeEnrollment is one enrolled external host.
+//
+// The authorizations are carried on the record rather than only in an
+// audit log, so that an operator reading the enrolled set can see WHO
+// admitted each host without correlating against a log that may have
+// rotated.
+message ExternalNodeEnrollment {
+  // provider is the provider that produced the observation.
+  string provider = 1;
+
+  // source_id identifies the provider installation. It is empty for a
+  // provider that does not cluster.
+  string source_id = 2;
+
+  // name is the provider's own name for the host.
+  string name = 3;
+
+  // fingerprint is the provider's stable per-node identity anchor,
+  // captured at enrollment. It is what makes a rename detectable as a
+  // conflict rather than silently forking a record.
+  string fingerprint = 4;
+
+  // status is the host's standing: "enrolled", "absent", or
+  // "conflict".
+  //
+  // An unrecognized status must be treated as unknown, never as
+  // enrolled.
+  string status = 5;
+
+  // provider_status is the provider's own status for the host, verbatim
+  // and unnormalized.
+  string provider_status = 6;
+
+  // enrolled_at_unix is when the second authorizing act was recorded.
+  int64 enrolled_at_unix = 7;
+
+  // enrolled_by names the enrollment's origin, so an operator can tell
+  // afterwards which hosts came from a provider and which were joined
+  // by hand.
+  string enrolled_by = 8;
+
+  // authorizations are the two authorizing acts that produced this
+  // record: two distinct API keys, presented to two distinct Colony
+  // members.
+  repeated ExternalNodeAuthorization authorizations = 9;
+}
+
+// ExternalNodeAuthorization is one authorizing act.
+message ExternalNodeAuthorization {
+  // key_id is the API key that authorized the act.
+  string key_id = 1;
+
+  // node_id is the Colony member the act was presented to.
+  string node_id = 2;
+
+  // at_unix is when the act was recorded.
+  int64 at_unix = 3;
+}
+
+// EnrollExternalNodeRequest admits a discovered external host.
+//
+// The FIRST call records one authorizing act and deliberately admits
+// nobody: the response says a second authorization is required. The
+// SECOND call, with a different API key, presented to a different
+// Colony member, completes the enrollment.
+message EnrollExternalNodeRequest {
+  // provider is the provider that observed the host.
+  string provider = 1;
+
+  // source_id identifies the provider installation.
+  string source_id = 2;
+
+  // name is the provider's own name for the host.
+  string name = 3;
+
+  // confirm_phrase must exactly equal the server's own required phrase
+  // or the call is refused with no action taken at all. This is the
+  // same convention ADR-0113 established for the Colony join: the
+  // phrase is an acknowledgement that an operator saw WHICH host was
+  // being admitted, not an authentication mechanism.
+  string confirm_phrase = 4;
+
+  // fingerprint is the provider's stable per-node identity anchor,
+  // optionally supplied by the caller as the value the operator read
+  // off the provider's own screen. When supplied it is compared
+  // against what discovery observed, and a disagreement is a refusal
+  // showing both values.
+  string fingerprint = 5;
+
+  // timeout_ms bounds the call.
+  uint32 timeout_ms = 6;
+
+  // authorizing_node_id is which Colony member this authorization was
+  // presented TO, and it is set by that member - never taken from the
+  // caller's request body over an already-set value.
+  string authorizing_node_id = 7;
+}
+
+// EnrollExternalNodeResponse reports the enrollment's outcome.
+message EnrollExternalNodeResponse {
+  // enrollment is the enrolled record, once both authorizing acts are
+  // in.
+  ExternalNodeEnrollment enrollment = 1;
+
+  // error is set when the call refused.
+  string error = 2;
+
+  // leader_hint names the Colony leader, when this call could not be
+  // completed on this member.
+  string leader_hint = 3;
+
+  // awaiting_second_authorization is set when this call recorded ONE
+  // authorizing act and deliberately admitted nobody. It is neither an
+  // error nor a success: nothing has been enrolled yet, and
+  // second_authorization_required says exactly what is still needed.
+  bool awaiting_second_authorization = 4;
+
+  // second_authorization_required names what is still needed.
+  string second_authorization_required = 5;
+}
+
+// RemoveExternalEnrollmentRequest withdraws an enrollment.
+message RemoveExternalEnrollmentRequest {
+  // provider is the provider that observed the host.
+  string provider = 1;
+
+  // source_id identifies the provider installation.
+  string source_id = 2;
+
+  // name is the provider's own name for the host.
+  string name = 3;
+
+  // confirm_phrase must exactly equal the server's own required phrase
+  // or the call is refused with no action taken at all.
+  string confirm_phrase = 4;
+
+  // timeout_ms bounds the call.
+  uint32 timeout_ms = 5;
+}
+
+// RemoveExternalEnrollmentResponse reports the outcome.
+message RemoveExternalEnrollmentResponse {
+  // removed is true when the enrollment was withdrawn.
+  bool removed = 1;
+
+  // error is set when the call refused.
+  string error = 2;
+
+  // leader_hint names the Colony leader, when this call could not be
+  // completed on this member.
+  string leader_hint = 3;
 }
 
 // ExternalDiscoveryConflict is one record that could not be placed

@@ -32,11 +32,16 @@ type FSMApplyResult struct {
 	ApiKey             *internalpb.ApiKey
 	Jail               *internalpb.JailDefinition
 	PendingJoinRequest *internalpb.PendingJoinRequest
-	RestartLease       *internalpb.RestartLease
-	RestartRecord      *internalpb.RestartRecord
-	ColonyUpdate       *internalpb.ColonyUpdate
-	ColonyJoinWindow   *internalpb.ColonyJoinWindow
-	TrustedPeer        *internalpb.TrustedPeer
+	// PendingExternalEnrollment is ADR-0191's enrollment attempt. It is
+	// carried alongside PendingJoinRequest because the two are separate
+	// stores with separate purposes: a join request becomes a MEMBER,
+	// and an enrollment attempt does not.
+	PendingExternalEnrollment *internalpb.PendingExternalEnrollment
+	RestartLease              *internalpb.RestartLease
+	RestartRecord             *internalpb.RestartRecord
+	ColonyUpdate              *internalpb.ColonyUpdate
+	ColonyJoinWindow          *internalpb.ColonyJoinWindow
+	TrustedPeer               *internalpb.TrustedPeer
 	// CertificateReservation is ADR-0171's reservation result. It is
 	// carried alongside TrustedPeer because the two stores are
 	// separate: a reservation is a pending intent and a pin is a
@@ -102,6 +107,13 @@ type FSM struct {
 	apiKeys             map[string]*internalpb.ApiKey
 	jails               map[string]*internalpb.JailDefinition
 	pendingJoinRequests map[string]*internalpb.PendingJoinRequest
+
+	// pendingExternalEnrollments is ADR-0191's enrollment half: the
+	// in-flight enrollment attempts and the authorizing acts recorded
+	// against them. See internal/raft/externalenrollment.go for why
+	// the AUTHORIZING ACTS are replicated while the enrollment record
+	// itself is local.
+	pendingExternalEnrollments map[string]*internalpb.PendingExternalEnrollment
 
 	// restartLeases/restartRecords back the action-preflight restart
 	// guardrail (ADR-0103) - see RestartLease/RestartRecord's own doc
@@ -200,16 +212,17 @@ var _ raft.FSM = (*FSM)(nil)
 // NewFSM returns an empty FSM.
 func NewFSM() *FSM {
 	f := &FSM{
-		vms:                     make(map[string]*internalpb.VMDefinition),
-		networks:                make(map[string]*internalpb.NetworkDefinition),
-		apiKeys:                 make(map[string]*internalpb.ApiKey),
-		jails:                   make(map[string]*internalpb.JailDefinition),
-		pendingJoinRequests:     make(map[string]*internalpb.PendingJoinRequest),
-		restartLeases:           make(map[string]*internalpb.RestartLease),
-		restartRecords:          make(map[string]*internalpb.RestartRecord),
-		colonyUpdates:           make(map[string]*internalpb.ColonyUpdate),
-		trustedPeers:            make(map[string]*internalpb.TrustedPeer),
-		certificateReservations: make(map[string]*internalpb.CertificateReservation),
+		vms:                        make(map[string]*internalpb.VMDefinition),
+		networks:                   make(map[string]*internalpb.NetworkDefinition),
+		apiKeys:                    make(map[string]*internalpb.ApiKey),
+		jails:                      make(map[string]*internalpb.JailDefinition),
+		pendingJoinRequests:        make(map[string]*internalpb.PendingJoinRequest),
+		pendingExternalEnrollments: make(map[string]*internalpb.PendingExternalEnrollment),
+		restartLeases:              make(map[string]*internalpb.RestartLease),
+		restartRecords:             make(map[string]*internalpb.RestartRecord),
+		colonyUpdates:              make(map[string]*internalpb.ColonyUpdate),
+		trustedPeers:               make(map[string]*internalpb.TrustedPeer),
+		certificateReservations:    make(map[string]*internalpb.CertificateReservation),
 	}
 	// Seed the digest of the empty state. No lock is taken because the
 	// FSM has not been handed to anyone yet; recomputeStateDigestLocked
@@ -290,6 +303,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCreatePendingJoinRequest(log.Index, op.CreatePendingJoinRequest.GetRequest())
 	case *internalpb.Command_RecordJoinApproval:
 		return f.applyRecordJoinApproval(log.Index, op.RecordJoinApproval)
+	case *internalpb.Command_CreatePendingExternalEnrollment:
+		return f.applyCreatePendingExternalEnrollment(log.Index, op.CreatePendingExternalEnrollment.GetEnrollment())
+	case *internalpb.Command_RecordExternalEnrollment:
+		return f.applyRecordExternalEnrollment(log.Index, op.RecordExternalEnrollment)
+	case *internalpb.Command_ResolveExternalEnrollment:
+		return f.applyResolveExternalEnrollment(log.Index, op.ResolveExternalEnrollment)
 	case *internalpb.Command_ApprovePendingJoinRequest:
 		return f.applyApprovePendingJoinRequest(log.Index, op.ApprovePendingJoinRequest)
 	case *internalpb.Command_RejectPendingJoinRequest:

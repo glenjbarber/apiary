@@ -166,6 +166,18 @@ func (f *fakeClient) GetExternalDiscovery(ctx context.Context, _ *rpcpb.GetExter
 	return &rpcpb.GetExternalDiscoveryResponse{}, nil
 }
 
+func (f *fakeClient) GetExternalEnrollments(ctx context.Context, _ *rpcpb.GetExternalEnrollmentsRequest, _ ...grpc.CallOption) (*rpcpb.GetExternalEnrollmentsResponse, error) {
+	return &rpcpb.GetExternalEnrollmentsResponse{}, nil
+}
+
+func (f *fakeClient) EnrollExternalNode(ctx context.Context, _ *rpcpb.EnrollExternalNodeRequest, _ ...grpc.CallOption) (*rpcpb.EnrollExternalNodeResponse, error) {
+	return &rpcpb.EnrollExternalNodeResponse{}, nil
+}
+
+func (f *fakeClient) RemoveExternalEnrollment(ctx context.Context, _ *rpcpb.RemoveExternalEnrollmentRequest, _ ...grpc.CallOption) (*rpcpb.RemoveExternalEnrollmentResponse, error) {
+	return &rpcpb.RemoveExternalEnrollmentResponse{}, nil
+}
+
 func (f *fakeClient) GetMonitoringNodes(ctx context.Context, _ *rpcpb.GetMonitoringNodesRequest, _ ...grpc.CallOption) (*rpcpb.GetMonitoringNodesResponse, error) {
 	f.lastMonitoringNodesCtx = ctx
 	return f.monitoringNodesResp, f.monitoringNodesErr
