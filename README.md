@@ -1187,6 +1187,20 @@ real FreeBSD host instead. `frontend`/`raftd`/`restshimd`/`apiaryctl`/
 `apiaryinstall`/`versioncheck`/`apiary-mcp` are unaffected and are pure
 Go.
 
+## Sponsoring Apiary
+
+Apiary is BSD 2-Clause and developed in the open. Sponsorship buys
+development time — it does not buy a license, support contract, or
+roadmap control.
+
+If Apiary is useful to you, or you want a FreeBSD-native bhyve/jail
+control plane to exist, you can sponsor the work here:
+
+https://github.com/sponsors/glenjbarber
+
+For paid advice on FreeBSD virtualization or an Apiary deployment,
+book a consultation: https://www.everyexpert.com/glenjbarber
+
 ## License
 
 See [LICENSE](LICENSE).
