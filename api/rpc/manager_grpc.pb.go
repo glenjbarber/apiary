@@ -54,6 +54,9 @@ const (
 	ManagerService_GetMonitoringCluster_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetMonitoringCluster"
 	ManagerService_GetMonitoringNodes_FullMethodName                  = "/apiary.rpc.v1.ManagerService/GetMonitoringNodes"
 	ManagerService_GetExternalDiscovery_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetExternalDiscovery"
+	ManagerService_GetExternalEnrollments_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetExternalEnrollments"
+	ManagerService_EnrollExternalNode_FullMethodName                  = "/apiary.rpc.v1.ManagerService/EnrollExternalNode"
+	ManagerService_RemoveExternalEnrollment_FullMethodName            = "/apiary.rpc.v1.ManagerService/RemoveExternalEnrollment"
 	ManagerService_GetVMConsole_FullMethodName                        = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_ProxyVMConsole_FullMethodName                      = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -371,6 +374,44 @@ type ManagerServiceClient interface {
 	// cell. It is an observation of a resource some other management
 	// plane owns, and this RPC never implies that Apiary manages it.
 	GetExternalDiscovery(ctx context.Context, in *GetExternalDiscoveryRequest, opts ...grpc.CallOption) (*GetExternalDiscoveryResponse, error)
+	// GetExternalEnrollments reports the external hosts this Colony has
+	// enrolled.
+	//
+	// An ENROLLED external host is one an operator admitted to this
+	// Colony's reporting domain through two separate authorizing acts.
+	// It is NOT a member: it holds no raft vote, it is not a Comb, and
+	// Apiary does not manage its workloads. This RPC never implies
+	// otherwise.
+	//
+	// Viewer-authorized, the same tier as GetExternalDiscovery: it
+	// reports what was admitted, not a verdict about anything an
+	// operator can change.
+	GetExternalEnrollments(ctx context.Context, in *GetExternalEnrollmentsRequest, opts ...grpc.CallOption) (*GetExternalEnrollmentsResponse, error)
+	// EnrollExternalNode admits a discovered external host to this
+	// Colony's reporting domain.
+	//
+	// This is the ENROLLMENT half of ADR-0191, and it is gated by the
+	// same machinery that gates a Colony join: a live Colony join
+	// window (ADR-0147 Part 4), two distinct API keys presented to two
+	// distinct Colony members (ADR-0147 Part 3), a single-use
+	// root-owned authorization entry, and the same confirmation phrase.
+	//
+	// What it does NOT do is the thing a Colony join does: it adds no
+	// voter. The enrolled host is not a member of anything, and the
+	// enrollment path cannot make it one.
+	//
+	// Admin-authorized.
+	EnrollExternalNode(ctx context.Context, in *EnrollExternalNodeRequest, opts ...grpc.CallOption) (*EnrollExternalNodeResponse, error)
+	// RemoveExternalEnrollment withdraws an enrollment.
+	//
+	// Removal is always an explicit operator action and is never a
+	// side-effect of a discovery scan. A host that vanished from a
+	// provider's listing is marked absent and kept, because deleting the
+	// record on that evidence destroys the history that makes the
+	// absence diagnosable.
+	//
+	// Admin-authorized.
+	RemoveExternalEnrollment(ctx context.Context, in *RemoveExternalEnrollmentRequest, opts ...grpc.CallOption) (*RemoveExternalEnrollmentResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -1570,6 +1611,36 @@ func (c *managerServiceClient) GetExternalDiscovery(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *managerServiceClient) GetExternalEnrollments(ctx context.Context, in *GetExternalEnrollmentsRequest, opts ...grpc.CallOption) (*GetExternalEnrollmentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetExternalEnrollmentsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetExternalEnrollments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) EnrollExternalNode(ctx context.Context, in *EnrollExternalNodeRequest, opts ...grpc.CallOption) (*EnrollExternalNodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnrollExternalNodeResponse)
+	err := c.cc.Invoke(ctx, ManagerService_EnrollExternalNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RemoveExternalEnrollment(ctx context.Context, in *RemoveExternalEnrollmentRequest, opts ...grpc.CallOption) (*RemoveExternalEnrollmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveExternalEnrollmentResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RemoveExternalEnrollment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVMConsoleResponse)
@@ -2749,6 +2820,44 @@ type ManagerServiceServer interface {
 	// cell. It is an observation of a resource some other management
 	// plane owns, and this RPC never implies that Apiary manages it.
 	GetExternalDiscovery(context.Context, *GetExternalDiscoveryRequest) (*GetExternalDiscoveryResponse, error)
+	// GetExternalEnrollments reports the external hosts this Colony has
+	// enrolled.
+	//
+	// An ENROLLED external host is one an operator admitted to this
+	// Colony's reporting domain through two separate authorizing acts.
+	// It is NOT a member: it holds no raft vote, it is not a Comb, and
+	// Apiary does not manage its workloads. This RPC never implies
+	// otherwise.
+	//
+	// Viewer-authorized, the same tier as GetExternalDiscovery: it
+	// reports what was admitted, not a verdict about anything an
+	// operator can change.
+	GetExternalEnrollments(context.Context, *GetExternalEnrollmentsRequest) (*GetExternalEnrollmentsResponse, error)
+	// EnrollExternalNode admits a discovered external host to this
+	// Colony's reporting domain.
+	//
+	// This is the ENROLLMENT half of ADR-0191, and it is gated by the
+	// same machinery that gates a Colony join: a live Colony join
+	// window (ADR-0147 Part 4), two distinct API keys presented to two
+	// distinct Colony members (ADR-0147 Part 3), a single-use
+	// root-owned authorization entry, and the same confirmation phrase.
+	//
+	// What it does NOT do is the thing a Colony join does: it adds no
+	// voter. The enrolled host is not a member of anything, and the
+	// enrollment path cannot make it one.
+	//
+	// Admin-authorized.
+	EnrollExternalNode(context.Context, *EnrollExternalNodeRequest) (*EnrollExternalNodeResponse, error)
+	// RemoveExternalEnrollment withdraws an enrollment.
+	//
+	// Removal is always an explicit operator action and is never a
+	// side-effect of a discovery scan. A host that vanished from a
+	// provider's listing is marked absent and kept, because deleting the
+	// record on that evidence destroys the history that makes the
+	// absence diagnosable.
+	//
+	// Admin-authorized.
+	RemoveExternalEnrollment(context.Context, *RemoveExternalEnrollmentRequest) (*RemoveExternalEnrollmentResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -3700,6 +3809,15 @@ func (UnimplementedManagerServiceServer) GetMonitoringNodes(context.Context, *Ge
 func (UnimplementedManagerServiceServer) GetExternalDiscovery(context.Context, *GetExternalDiscoveryRequest) (*GetExternalDiscoveryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetExternalDiscovery not implemented")
 }
+func (UnimplementedManagerServiceServer) GetExternalEnrollments(context.Context, *GetExternalEnrollmentsRequest) (*GetExternalEnrollmentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetExternalEnrollments not implemented")
+}
+func (UnimplementedManagerServiceServer) EnrollExternalNode(context.Context, *EnrollExternalNodeRequest) (*EnrollExternalNodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnrollExternalNode not implemented")
+}
+func (UnimplementedManagerServiceServer) RemoveExternalEnrollment(context.Context, *RemoveExternalEnrollmentRequest) (*RemoveExternalEnrollmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveExternalEnrollment not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
 }
@@ -4621,6 +4739,60 @@ func _ManagerService_GetExternalDiscovery_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetExternalDiscovery(ctx, req.(*GetExternalDiscoveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetExternalEnrollments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExternalEnrollmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetExternalEnrollments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetExternalEnrollments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetExternalEnrollments(ctx, req.(*GetExternalEnrollmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_EnrollExternalNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnrollExternalNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).EnrollExternalNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_EnrollExternalNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).EnrollExternalNode(ctx, req.(*EnrollExternalNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_RemoveExternalEnrollment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveExternalEnrollmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RemoveExternalEnrollment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RemoveExternalEnrollment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RemoveExternalEnrollment(ctx, req.(*RemoveExternalEnrollmentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -6444,6 +6616,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetExternalDiscovery",
 			Handler:    _ManagerService_GetExternalDiscovery_Handler,
+		},
+		{
+			MethodName: "GetExternalEnrollments",
+			Handler:    _ManagerService_GetExternalEnrollments_Handler,
+		},
+		{
+			MethodName: "EnrollExternalNode",
+			Handler:    _ManagerService_EnrollExternalNode_Handler,
+		},
+		{
+			MethodName: "RemoveExternalEnrollment",
+			Handler:    _ManagerService_RemoveExternalEnrollment_Handler,
 		},
 		{
 			MethodName: "GetVMConsole",

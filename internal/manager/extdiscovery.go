@@ -114,6 +114,24 @@ func newDiscoveryState(proxmoxCfg *proxmoxdiscovery.Config, sylveCfg *sylvedisco
 	return state
 }
 
+// store returns the store a named provider's observations accumulate in.
+//
+// It reports whether the provider is configured at all, which is
+// different from "the provider is configured and found nothing" - the
+// two are what an enrollment refusal has to tell apart.
+func (d *discoveryState) store(providerName string) (*extdiscovery.Store, bool) {
+	if d == nil {
+		return nil, false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	p, ok := d.providers[providerName]
+	if !ok {
+		return nil, false
+	}
+	return p.store, true
+}
+
 // intervalOrDefault returns the configured interval, or the default.
 func intervalOrDefault(interval time.Duration) time.Duration {
 	if interval > 0 {

@@ -24,6 +24,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/buildgate"
 	"github.com/glenjbarber/apiary/internal/cellrecommend"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/extnodes"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/guardrail"
 	"github.com/glenjbarber/apiary/internal/hast"
@@ -592,6 +593,17 @@ type Server struct {
 	// pre-AddVoter check (ADR-0097).
 	reachabilityCheck func(ctx context.Context, addr string) error
 
+	// extNodes is ADR-0191's enrollment store: the external hosts this
+	// Colony has admitted to its reporting domain.
+	//
+	// It is LOCAL state, not raft-replicated state. The AUTHORIZING
+	// ACTS are replicated (internal/raft/externalenrollment.go),
+	// because the two-person rule has to count the same way on every
+	// replica; the enrollment RECORD is not, because a provider
+	// credential is a per-host secret and because an enrolled external
+	// host is not a Colony fact in the way a member is.
+	extNodes *extnodes.Store
+
 	// joinAuthorizationsPath is ADR-0147 Part 3's root-owned
 	// authorization store. Empty means joinauth.DefaultPath, which is
 	// where `apiaryctl install` creates it and where
@@ -897,6 +909,13 @@ func (s *Server) SetDiscoveryProviders(ctx context.Context, proxmoxCfg *proxmoxd
 	state.Run(ctx)
 	return state
 }
+
+// SetExternalNodeStore wires ADR-0191's enrollment store.
+//
+// It is a setter for the same reason SetDiscoveryProviders is: the
+// established NewServer signature stays stable across managerd and its
+// many focused tests.
+func (s *Server) SetExternalNodeStore(store *extnodes.Store) { s.extNodes = store }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.
 // Production servers use netif.List automatically.

@@ -138,6 +138,16 @@ func (c *RaftClient) GetPendingJoinRequestLocal(ctx context.Context, requestID s
 	return c.client.GetPendingJoinRequestLocal(ctx, &internalpb.GetPendingJoinRequestRequest{RequestId: requestID})
 }
 
+// ListPendingExternalEnrollmentsLocal backs ADR-0191's enrollment half.
+//
+// The list side is what lets the SECOND authorizing act find the
+// attempt the FIRST one created, including when the first act was
+// presented to a different Colony member - which is the whole point of
+// the two-person rule.
+func (c *RaftClient) ListPendingExternalEnrollmentsLocal(ctx context.Context) (*internalpb.ListPendingExternalEnrollmentsResponse, error) {
+	return c.client.ListPendingExternalEnrollmentsLocal(ctx, &internalpb.ListPendingExternalEnrollmentsRequest{})
+}
+
 // GetRestartLeaseStateLocal backs PreflightRestartNodeService (ADR-0103) -
 // a plain read of this node's own FSM copy, mirroring
 // GetPendingJoinRequestLocal above.

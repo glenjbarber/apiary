@@ -234,6 +234,15 @@ var SecretPaths = []SecretPath{
 		RestoreProcedure: "provision a non-admin Sylve identity and write its token to this path on the rebuilt Comb",
 	},
 	{
+		Kind:             SecretPathExternalNodeStore,
+		StructName:       "nodeconfig.Config",
+		FieldName:        "ExternalNodeStorePath",
+		JSONName:         "external_node_store_path",
+		Why:              "the value is a path to the file recording which EXTERNAL HOSTS this Colony has admitted to its reporting domain (ADR-0191's enrollment half). The file is not a credential, but it is a record of which external hosts are trusted and which two authorizing acts admitted each one, so it is recorded as a path and never copied",
+		LiveCopy:         "the file this path names, mode-restricted, on this Comb",
+		RestoreProcedure: "re-create the enrollment store on the rebuilt Comb, and re-run the two-authorization enrollment for each external host; the store's contents are NOT in the archive",
+	},
+	{
 		Kind:       SecretPathTLSKey,
 		StructName: "nodeconfig.Config",
 		FieldName:  "TLSKey",
@@ -328,6 +337,15 @@ const (
 	// nodeconfig.Config.SylveDiscoveryTokenFile - the bearer token the
 	// read-only discovery provider (ADR-0192) presents on every poll.
 	SecretPathSylveDiscoveryToken SecretPathKind = "nodeconfig.sylve_discovery_token_file"
+
+	// SecretPathExternalNodeStore is ADR-0191's enrollment store: the
+	// record of which external hosts this Colony has admitted.
+	//
+	// It is not a credential and it is not the authorization file. It
+	// is recorded as a path anyway, because the path names a file that
+	// says which external hosts are trusted, and a restore operator
+	// needs to know it has to be re-created.
+	SecretPathExternalNodeStore SecretPathKind = "nodeconfig.external_node_store_path"
 )
 
 // SecretPath is one entry in the path table. It carries the same four
@@ -683,6 +701,11 @@ type NodeConfigRecord struct {
 	// endpoints rather than falling back to plaintext.
 	HASTTunnelEnabled   bool   `json:"hast_tunnel_enabled,omitempty"`
 	HASTTunnelAddresses string `json:"hast_tunnel_addresses,omitempty"`
+
+	// ExternalNodeStorePath is ADR-0191's enrollment store path. It is
+	// projected as a PATH and never with its contents, which is the
+	// same rule the credential paths follow.
+	ExternalNodeStorePath string `json:"external_node_store_path,omitempty"`
 
 	JailPrefix     string `json:"jail_prefix,omitempty"`
 	JailMountBase  string `json:"jail_mount_base,omitempty"`

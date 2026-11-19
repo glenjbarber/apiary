@@ -325,6 +325,18 @@ func (f *fakeClient) GetExternalDiscovery(context.Context, *rpcpb.GetExternalDis
 	return &rpcpb.GetExternalDiscoveryResponse{}, nil
 }
 
+func (f *fakeClient) GetExternalEnrollments(context.Context, *rpcpb.GetExternalEnrollmentsRequest, ...grpc.CallOption) (*rpcpb.GetExternalEnrollmentsResponse, error) {
+	return &rpcpb.GetExternalEnrollmentsResponse{}, nil
+}
+
+func (f *fakeClient) EnrollExternalNode(context.Context, *rpcpb.EnrollExternalNodeRequest, ...grpc.CallOption) (*rpcpb.EnrollExternalNodeResponse, error) {
+	return &rpcpb.EnrollExternalNodeResponse{}, nil
+}
+
+func (f *fakeClient) RemoveExternalEnrollment(context.Context, *rpcpb.RemoveExternalEnrollmentRequest, ...grpc.CallOption) (*rpcpb.RemoveExternalEnrollmentResponse, error) {
+	return &rpcpb.RemoveExternalEnrollmentResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

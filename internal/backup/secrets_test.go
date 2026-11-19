@@ -120,6 +120,12 @@ func TestNodeConfigDenyListIsComplete(t *testing.T) {
 			// reaches an archive.
 			"ProxmoxDiscoveryTokenFile": {},
 			"SylveDiscoveryTokenFile":   {},
+			// ADR-0191's enrollment store: the record of which
+			// external hosts this Colony has admitted. The path is
+			// recorded so a restore operator knows it has to be
+			// re-created; the store's contents never reach an
+			// archive.
+			"ExternalNodeStorePath": {},
 		})
 }
 

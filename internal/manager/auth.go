@@ -108,8 +108,14 @@ var requiredRole = map[string]Role{
 	// about anything an operator can change, and it can never be used
 	// to change a provider's state.
 	"/apiary.rpc.v1.ManagerService/GetExternalDiscovery": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostPackages":         RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNodeServices":     RoleViewer,
+	// GetExternalEnrollments (ADR-0191's enrollment half) is a READ of
+	// Apiary's own record of which external hosts it has admitted. It
+	// is Viewer, the same tier as GetExternalDiscovery above: it
+	// reports what was admitted, not a verdict about anything an
+	// operator can change.
+	"/apiary.rpc.v1.ManagerService/GetExternalEnrollments": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostPackages":           RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNodeServices":       RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read
@@ -238,11 +244,18 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ForcePurgeVM":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/ForcePurgeJail":              RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource": RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/CreateAPIKey":                RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress":   RoleAdmin,
+	// EnrollExternalNode and RemoveExternalEnrollment (ADR-0191's
+	// enrollment half) are Admin. An enrollment admits a host to the
+	// Colony's reporting domain, and it is gated by the join window
+	// and the two-person rule as well - the role is the first gate,
+	// not the only one.
+	"/apiary.rpc.v1.ManagerService/EnrollExternalNode":        RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/RemoveExternalEnrollment":  RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/CreateAPIKey":              RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ListAPIKeys":               RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":              RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":          RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress": RoleAdmin,
 	// ConvertStandaloneToJoiner (ADR-0105) stops/resets/restarts this
 	// node's own raftd and submits a Colony join request - a host-wide,
 	// only-narrowly-reversible physical change, same tier as

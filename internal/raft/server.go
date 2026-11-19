@@ -75,6 +75,14 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.PendingJoinRequest != nil {
 		payload = result.PendingJoinRequest
 	}
+	// PendingExternalEnrollment has an arm of its own for the same
+	// reason the ones below do: without one, a successful enrollment
+	// attempt would answer with zero bytes, which the managerd side
+	// unmarshals into a zero-valued attempt - and a caller reading
+	// that would think no attempt had been recorded.
+	if result.PendingExternalEnrollment != nil {
+		payload = result.PendingExternalEnrollment
+	}
 	if result.RestartLease != nil {
 		payload = result.RestartLease
 	}
@@ -422,6 +430,30 @@ func (s *Server) GetPendingJoinRequestLocal(_ context.Context, req *internalpb.G
 
 func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.ListPendingJoinRequestsRequest) (*internalpb.ListPendingJoinRequestsResponse, error) {
 	return &internalpb.ListPendingJoinRequestsResponse{Requests: s.node.ListPendingJoinRequestsLocal()}, nil
+}
+
+// GetPendingExternalEnrollmentLocal implements RaftInternal - ADR-0191's
+// enrollment half's read side.
+//
+// Deliberately NOT leader-only, mirroring GetPendingJoinRequestLocal
+// above: the attempt is replicated state, and the second authorizing act
+// may be presented to a follower.
+func (s *Server) GetPendingExternalEnrollmentLocal(_ context.Context, req *internalpb.GetPendingExternalEnrollmentRequest) (*internalpb.GetPendingExternalEnrollmentResponse, error) {
+	enrollment, found := s.node.GetPendingExternalEnrollmentLocal(req.GetRequestId())
+	if !found {
+		return &internalpb.GetPendingExternalEnrollmentResponse{Error: fmt.Sprintf("external enrollment %q not found", req.GetRequestId())}, nil
+	}
+	return &internalpb.GetPendingExternalEnrollmentResponse{Enrollment: enrollment}, nil
+}
+
+// ListPendingExternalEnrollmentsLocal implements RaftInternal - ADR-0191's
+// enrollment half's list side.
+//
+// Deliberately NOT leader-only, mirroring GetPendingExternalEnrollmentLocal
+// above: the second authorizing act may be presented to a follower, and
+// it has to find the attempt the first act created.
+func (s *Server) ListPendingExternalEnrollmentsLocal(_ context.Context, _ *internalpb.ListPendingExternalEnrollmentsRequest) (*internalpb.ListPendingExternalEnrollmentsResponse, error) {
+	return &internalpb.ListPendingExternalEnrollmentsResponse{Enrollments: s.node.ListPendingExternalEnrollmentsLocal()}, nil
 }
 
 // GetColonyJoinWindowLocal implements RaftInternal - ADR-0147 Part 4's

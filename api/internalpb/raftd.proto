@@ -120,6 +120,26 @@ service RaftInternal {
   rpc GetPendingJoinRequestLocal(GetPendingJoinRequestRequest) returns (GetPendingJoinRequestResponse);
   rpc ListPendingJoinRequestsLocal(ListPendingJoinRequestsRequest) returns (ListPendingJoinRequestsResponse);
 
+  // GetPendingExternalEnrollmentLocal backs ADR-0191's enrollment
+  // half: the read side of the pending enrollment attempt the two
+  // authorizing acts attach to.
+  //
+  // Deliberately NOT leader-only, for the same
+  // GetPendingJoinRequestLocal reason: the attempt is already
+  // raft-replicated, so any node can answer for itself. That is what
+  // lets a second authorizing act presented to a FOLLOWER be recorded
+  // the same way one presented to the leader would be - and the
+  // two-person rule is only meaningful if the two Combs involved do
+  // not have to be the same one.
+  rpc GetPendingExternalEnrollmentLocal(GetPendingExternalEnrollmentRequest) returns (GetPendingExternalEnrollmentResponse);
+
+  // ListPendingExternalEnrollmentsLocal is the list side of the same
+  // read, and is what lets the second authorizing act find the attempt
+  // the first one created - including when the first act was presented
+  // to a DIFFERENT Colony member, which is the whole point of the
+  // two-person rule.
+  rpc ListPendingExternalEnrollmentsLocal(ListPendingExternalEnrollmentsRequest) returns (ListPendingExternalEnrollmentsResponse);
+
   // GetRestartLeaseStateLocal backs the action-preflight restart
   // guardrail (ADR-0103) - deliberately WITHOUT the leader-only
   // restriction, the same GetPendingJoinRequestLocal reasoning above:
@@ -439,6 +459,22 @@ message GetPendingJoinRequestRequest {
 
 message GetPendingJoinRequestResponse {
   PendingJoinRequest request = 1;
+  string error = 2;
+}
+
+message GetPendingExternalEnrollmentRequest {
+  string request_id = 1;
+}
+
+message GetPendingExternalEnrollmentResponse {
+  PendingExternalEnrollment enrollment = 1;
+  string error = 2;
+}
+
+message ListPendingExternalEnrollmentsRequest {}
+
+message ListPendingExternalEnrollmentsResponse {
+  repeated PendingExternalEnrollment enrollments = 1;
   string error = 2;
 }
 

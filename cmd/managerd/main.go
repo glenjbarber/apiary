@@ -33,6 +33,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/deadman"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/extnodes"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/hostconfig"
@@ -661,6 +662,31 @@ func run() error {
 	}
 	srv.SetDiscoveryProviders(ctx, proxmoxDiscoveryCfg, sylveDiscoveryCfg,
 		cfg.ProxmoxDiscoveryInterval, cfg.SylveDiscoveryInterval)
+
+	// ADR-0191's enrollment store: the record of which external hosts
+	// this Colony has admitted to its reporting domain.
+	//
+	// A store that cannot be read is NOT a store with no enrollments.
+	// Treating an unreadable store as empty would make every enrolled
+	// host look unenrolled, and the operator would see a Colony that
+	// had quietly forgotten its external hosts. So a read failure is
+	// logged and the enrollment RPCs refuse, rather than the store
+	// being quietly empty.
+	//
+	// The AUTHORIZING ACTS are replicated (internal/raft), and the
+	// enrollment RECORD is this local file. That split is deliberate
+	// and is explained in internal/extnodes' own package comment.
+	extNodeStorePath := cfg.ExternalNodeStorePath
+	if extNodeStorePath == "" {
+		extNodeStorePath = extnodes.DefaultPath
+	}
+	extNodeStore, extNodeStoreErr := extnodes.Load(extNodeStorePath)
+	if extNodeStoreErr != nil {
+		log.Printf("managerd: the external-node enrollment store at %s could not be read: %v. Enrollment and removal will REFUSE until this is resolved, because a store that reads as empty would make every enrolled host look unenrolled", extNodeStorePath, extNodeStoreErr)
+	} else {
+		srv.SetExternalNodeStore(extNodeStore)
+		log.Printf("managerd: external-node enrollment store at %s holds %d enrollment(s)", extNodeStorePath, len(extNodeStore.Enrollments()))
+	}
 
 	go runReconcileLoop(ctx, reconciler, cfg.ReconcileInterval)
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
